@@ -81,13 +81,20 @@ def export_simulation(path, strategies):
 def standalone_dashboard(output, report):
     html = (WEB / "index.html").read_text(encoding="utf-8")
     css = (WEB / "styles.css").read_text(encoding="utf-8")
-    script = (WEB / "app.js").read_text(encoding="utf-8").replace("</script", "<\\/script")
+    charts = (WEB / "charts.js").read_text(encoding="utf-8").replace("</script", "<\\/script")
+    app = (WEB / "app.js").read_text(encoding="utf-8").replace("</script", "<\\/script")
     payload = report.read_text(encoding="utf-8").replace("<", "\\u003c")
-    html = html.replace('<link rel="stylesheet" href="/styles.css" />', f"<style>{css}</style>")
-    html = html.replace(
-        '<script type="module" src="/app.js"></script>',
-        f'<script id="embedded-report" type="application/json">{payload}</script>\n<script type="module">{script}</script>',
-    )
+    assets = {
+        '<link rel="stylesheet" href="/styles.css" />': f"<style>{css}</style>",
+        '<script src="/charts.js" defer></script>': f"<script>{charts}</script>",
+        '<script type="module" src="/app.js"></script>': (
+            f'<script id="embedded-report" type="application/json">{payload}</script>\n<script type="module">{app}</script>'
+        ),
+    }
+    for marker, content in assets.items():
+        if marker not in html:
+            raise RuntimeError(f"Не найден ресурс автономной панели: {marker}")
+        html = html.replace(marker, content, 1)
     output.write_text(html, encoding="utf-8")
 
 
@@ -229,6 +236,7 @@ class ReportHandler(BaseHTTPRequestHandler):
             "/": (WEB / "index.html", "text/html"),
             "/index.html": (WEB / "index.html", "text/html"),
             "/styles.css": (WEB / "styles.css", "text/css"),
+            "/charts.js": (WEB / "charts.js", "text/javascript"),
             "/app.js": (WEB / "app.js", "text/javascript"),
             "/results/report.json": (self.report, "application/json"),
             "/results/simulated-trades.csv": (self.report.with_name("simulated-trades.csv"), "text/csv"),

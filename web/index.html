@@ -1,157 +1,120 @@
 <!doctype html>
 <html lang="ru">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
-    <meta
-      name="description"
-      content="Контур — проверка торговых стратегий на исторических данных."
-    />
-    <title>Контур — лаборатория стратегий</title>
-    <link rel="stylesheet" href="/styles.css" />
-    <script type="module" src="/app.js"></script>
-  </head>
-  <body>
-    <a class="skip" href="#overview">К содержанию</a>
-    <header class="header">
-      <div class="header-inner">
-        <a class="brand" href="#overview" aria-label="Контур, к обзору">
-          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span>Контур</span>
-        </a>
-        <nav aria-label="Разделы">
-          <a href="#overview">Обзор</a><a href="#trades">Сделки</a
-          ><a href="#research">Методика</a>
-        </nav>
-        <label class="file-button" for="report-file"
-          ><span aria-hidden="true">↑</span> <span>Открыть отчёт</span></label
-        >
-        <input
-          id="report-file"
-          class="visually-hidden"
-          type="file"
-          accept=".json,application/json"
-        />
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Контур сравнивает торговые стратегии и объясняет результаты исторической проверки.">
+  <title>Контур · Исследование стратегий</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/charts.js" defer></script>
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#overview">К содержанию</a>
+  <aside class="rail" aria-label="Навигация по отчёту">
+    <a class="brand" href="#overview" aria-label="Контур, к обзору">
+      <span class="brand-mark" aria-hidden="true"><i></i></span><span>Контур</span>
+    </a>
+    <div class="rail-body">
+      <nav class="navigation" aria-label="Разделы">
+        <a href="#overview" aria-current="location"><i class="nav-icon icon-overview" aria-hidden="true"></i>Обзор</a>
+        <a href="#analysis"><i class="nav-icon icon-analysis" aria-hidden="true"></i>Разбор</a>
+        <a href="#trades"><i class="nav-icon icon-trades" aria-hidden="true"></i>Сделки</a>
+        <a href="#research"><i class="nav-icon icon-research" aria-hidden="true"></i>Методика</a>
+      </nav>
+      <div class="rail-footer">
+        <button id="open-report" class="open-report" type="button"><i class="upload-icon" aria-hidden="true"></i><span>Открыть JSON</span></button>
+        <input id="report-file" type="file" accept=".json,application/json" hidden>
       </div>
+    </div>
+  </aside>
+
+  <main class="layout" id="overview">
+    <header class="topline">
+      <span class="context-label">Исследование стратегий</span>
+      <span id="source-badge" class="source-badge" hidden><i aria-hidden="true"></i><span></span></span>
     </header>
-    <main class="layout" id="overview">
-      <div class="hero">
-        <div>
-          <div class="eyebrow">ЛАБОРАТОРИЯ СТРАТЕГИЙ</div>
-          <h1>Обзор стратегии</h1>
-          <p id="report-summary">Загружаем результаты прогона…</p>
-        </div>
-        <div id="source-badge" class="badge">
-          <i></i><span>Источник данных</span>
-        </div>
+
+    <section class="hero" aria-labelledby="hero-title">
+      <canvas id="prism" aria-hidden="true"></canvas>
+      <div class="hero-content">
+        <h1 id="hero-title">Как сработала стратегия</h1>
+        <p id="report-summary">Загружаем результаты прогона…</p>
+        <div class="hero-meta" id="hero-meta" aria-label="Инструменты и стартовый капитал"></div>
       </div>
-      <div id="notice" class="notice" role="status" hidden></div>
-      <section class="metrics" aria-label="Метрики стратегии">
-        <article class="metric">
-          <p>Чистый результат</p>
-          <strong id="net-value">—</strong
-          ><small id="net-detail">После торговых издержек</small>
-        </article>
-        <article class="metric">
-          <p>Макс. просадка</p>
-          <strong id="drawdown-value">—</strong><small>От пика капитала</small>
-        </article>
-        <article class="metric">
-          <p>Profit Factor</p>
-          <strong id="pf-value">—</strong
-          ><small>Валовая прибыль / убыток</small>
-        </article>
-        <article class="metric">
-          <p>Закрытые сделки</p>
-          <strong id="trades-value">—</strong
-          ><small id="trades-detail">Завершённые позиции</small>
-        </article>
-      </section>
-      <section class="chart-card card" aria-labelledby="equity-title">
-        <div class="card-head">
-          <div>
-            <h2 id="equity-title">Динамика капитала</h2>
-            <p>Стратегия и бенчмарки на одном периоде</p>
-          </div>
-          <div class="range" aria-label="Период графика">
-            <button type="button" data-days="30" aria-pressed="false">
-              1М
-            </button>
-            <button type="button" data-days="90" aria-pressed="false">
-              3М
-            </button>
-            <button type="button" data-days="180" aria-pressed="false">
-              6М
-            </button>
-            <button type="button" data-days="0" aria-pressed="true">
-              Весь
-            </button>
-          </div>
-        </div>
-        <div id="chart-wrap" class="chart-wrap">
-          <canvas
-            id="equity-chart"
-            aria-label="График капитала, значения в рублях"
-            role="img"
-            tabindex="0"
-            aria-describedby="chart-keys"
-          ></canvas>
-          <p class="visually-hidden" id="chart-keys">
-            Стрелки влево и вправо перемещают выбор по датам.
-          </p>
-          <p class="visually-hidden" id="chart-live" aria-live="polite"></p>
-          <div id="chart-empty" class="chart-empty" hidden>
-            В отчёте нет данных для графика.
-          </div>
-          <div class="tooltip" id="tooltip" aria-hidden="true" hidden></div>
-        </div>
-        <div id="chart-legend" class="legend"></div>
-      </section>
-      <div class="columns">
-        <section id="trades" class="card" aria-labelledby="trades-title">
-          <div class="card-head">
-            <div>
-              <h2 id="trades-title">Журнал сделок</h2>
-              <p id="trade-summary">Сделки из выбранного прогона</p>
-            </div>
-            <button
-              id="toggle-trades"
-              class="text-button"
-              type="button"
-              aria-expanded="false"
-              hidden
-            >
-              Все сделки
-            </button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Инструмент</th>
-                  <th scope="col">Вход</th>
-                  <th scope="col">Причина выхода</th>
-                  <th scope="col">Результат</th>
-                </tr>
-              </thead>
-              <tbody id="trade-body"></tbody>
-            </table>
-          </div>
-        </section>
-        <aside id="research" class="card" aria-labelledby="research-title">
-          <div class="card-head">
-            <div>
-              <h2 id="research-title">Данные и методика</h2>
-              <p>Что стоит за результатом</p>
-            </div>
-          </div>
-          <div id="research-lines" class="research"></div>
-        </aside>
+    </section>
+    <p id="notice" class="notice" role="alert" hidden></p>
+
+    <section class="metric-grid" aria-label="Метрики выбранной стратегии">
+      <article class="metric"><p>Чистый результат</p><strong id="net-value">—</strong><small id="net-detail">С учётом издержек</small></article>
+      <article class="metric"><p>Макс. просадка</p><strong id="drawdown-value">—</strong><small>От предыдущего пика</small></article>
+      <article class="metric"><p>Profit Factor</p><strong id="pf-value">—</strong><small>Прибыль / убыток</small></article>
+      <article class="metric"><p>Торговые ситуации</p><strong id="trades-value">—</strong><small id="trades-detail">Закрытые позиции</small></article>
+    </section>
+
+    <section class="analysis" id="analysis" aria-label="Разбор отчёта">
+      <form id="question-form" class="question-form">
+        <i class="question-icon" aria-hidden="true"></i>
+        <label class="sr-only" for="question">Вопрос по отчёту</label>
+        <input id="question" type="search" placeholder="Что разобрать в отчёте?" maxlength="180" autocomplete="off" spellcheck="false">
+        <button class="send-question" type="submit" aria-label="Показать разбор"><i aria-hidden="true"></i></button>
+      </form>
+      <div class="suggestions" aria-label="Вопросы по отчёту">
+        <button type="button" data-topic="comparison">Сравнить стратегии</button>
+        <button type="button" data-topic="risk">Откуда просадка?</button>
+        <button type="button" data-topic="trade">Как устроена сделка?</button>
+        <button type="button" data-topic="data">Что за данные?</button>
       </div>
-      <footer>
-        <span>Контур</span><span>Результаты исторической симуляции</span>
-      </footer>
-    </main>
-  </body>
+      <div id="answer" class="answer" hidden>
+        <div><h2 id="answer-title"></h2><div id="answer-content" aria-live="polite"></div></div>
+        <button id="clear-answer" class="close-answer" type="button" aria-label="Закрыть разбор">×</button>
+      </div>
+    </section>
+
+    <section class="chart-card" aria-labelledby="equity-title">
+      <header class="chart-head">
+        <h2 id="equity-title">Результаты проверки</h2>
+        <div class="ranges" aria-label="Период графика">
+          <button type="button" data-days="30" aria-pressed="false">1 мес.</button>
+          <button type="button" data-days="90" aria-pressed="false">3 мес.</button>
+          <button type="button" data-days="180" aria-pressed="false">6 мес.</button>
+          <button type="button" data-days="0" aria-pressed="true">Весь срок</button>
+        </div>
+      </header>
+      <div class="chart-toolbar">
+        <div class="metric-switch" role="group" aria-label="Показатель графика">
+          <button type="button" data-metric="equity" aria-pressed="true">Капитал</button>
+          <button type="button" data-metric="drawdown" aria-pressed="false">Просадка</button>
+          <button type="button" data-metric="outcomes" aria-pressed="false">Сделки</button>
+        </div>
+        <div id="chart-legend" class="legend" aria-label="Выбор стратегии"></div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="equity-chart" aria-label="График капитала" tabindex="0" role="img" aria-describedby="chart-keys"></canvas>
+        <p class="sr-only" id="chart-keys">Стрелки перемещают выбор по датам. Enter открывает ситуации на выбранную дату.</p>
+        <p class="sr-only" id="chart-live" aria-live="polite"></p>
+        <div class="tooltip" id="tooltip" aria-hidden="true" hidden></div>
+      </div>
+    </section>
+
+    <div class="below-chart">
+      <section class="detail-card" id="trades" aria-labelledby="trades-title">
+        <header class="detail-head">
+          <div><h2 id="trades-title">Журнал сделок</h2><p id="trade-summary">Сделки по выбранной стратегии</p></div>
+          <button type="button" class="text-button" id="export-trades" disabled>CSV</button>
+        </header>
+        <div class="date-filter" id="date-filter" hidden><span id="filter-label"></span><button id="clear-filter" type="button">Сбросить</button></div>
+        <div class="table-wrap">
+          <table><thead><tr><th scope="col">Тикер</th><th scope="col">Вход</th><th scope="col">Выход</th><th scope="col">Результат</th></tr></thead><tbody id="trade-body"></tbody></table>
+        </div>
+        <button type="button" class="text-button trade-more" id="toggle-trades" aria-expanded="false" hidden>Показать все сделки</button>
+      </section>
+      <section class="detail-card" id="research" aria-labelledby="research-title">
+        <header class="detail-head"><div><h2 id="research-title">Данные и методика</h2><p>От источников до сделки</p></div></header>
+        <div id="research-lines" class="research-body"></div>
+      </section>
+    </div>
+  </main>
+</body>
 </html>
