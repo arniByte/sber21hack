@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="Контур — проверка торговых стратегий на исторических данных."
+    />
+    <title>Контур — лаборатория стратегий</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#overview">К содержанию</a>
+    <header class="header">
+      <div class="header-inner">
+        <a class="brand" href="#overview" aria-label="Контур, к обзору">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span>Контур</span>
+        </a>
+        <nav aria-label="Разделы">
+          <a href="#overview">Обзор</a><a href="#trades">Сделки</a
+          ><a href="#research">Методика</a>
+        </nav>
+        <label class="file-button" for="report-file"
+          ><span aria-hidden="true">↑</span> <span>Открыть отчёт</span></label
+        >
+        <input
+          id="report-file"
+          class="visually-hidden"
+          type="file"
+          accept=".json,application/json"
+        />
+      </div>
+    </header>
+    <main class="layout" id="overview">
+      <div class="hero">
+        <div>
+          <div class="eyebrow">ЛАБОРАТОРИЯ СТРАТЕГИЙ</div>
+          <h1>Обзор стратегии</h1>
+          <p id="report-summary">Загружаем результаты прогона…</p>
+        </div>
+        <div id="source-badge" class="badge">
+          <i></i><span>Источник данных</span>
+        </div>
+      </div>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section class="metrics" aria-label="Метрики стратегии">
+        <article class="metric">
+          <p>Чистый результат</p>
+          <strong id="net-value">—</strong
+          ><small id="net-detail">После торговых издержек</small>
+        </article>
+        <article class="metric">
+          <p>Макс. просадка</p>
+          <strong id="drawdown-value">—</strong><small>От пика капитала</small>
+        </article>
+        <article class="metric">
+          <p>Profit Factor</p>
+          <strong id="pf-value">—</strong
+          ><small>Валовая прибыль / убыток</small>
+        </article>
+        <article class="metric">
+          <p>Закрытые сделки</p>
+          <strong id="trades-value">—</strong
+          ><small id="trades-detail">Завершённые позиции</small>
+        </article>
+      </section>
+      <section class="chart-card card" aria-labelledby="equity-title">
+        <div class="card-head">
+          <div>
+            <h2 id="equity-title">Динамика капитала</h2>
+            <p>Стратегия и бенчмарки на одном периоде</p>
+          </div>
+          <div class="range" aria-label="Период графика">
+            <button type="button" data-days="30" aria-pressed="false">
+              1М
+            </button>
+            <button type="button" data-days="90" aria-pressed="false">
+              3М
+            </button>
+            <button type="button" data-days="180" aria-pressed="false">
+              6М
+            </button>
+            <button type="button" data-days="0" aria-pressed="true">
+              Весь
+            </button>
+          </div>
+        </div>
+        <div id="chart-wrap" class="chart-wrap">
+          <canvas
+            id="equity-chart"
+            aria-label="График капитала, значения в рублях"
+            role="img"
+            tabindex="0"
+            aria-describedby="chart-keys"
+          ></canvas>
+          <p class="visually-hidden" id="chart-keys">
+            Стрелки влево и вправо перемещают выбор по датам.
+          </p>
+          <p class="visually-hidden" id="chart-live" aria-live="polite"></p>
+          <div id="chart-empty" class="chart-empty" hidden>
+            В отчёте нет данных для графика.
+          </div>
+          <div class="tooltip" id="tooltip" aria-hidden="true" hidden></div>
+        </div>
+        <div id="chart-legend" class="legend"></div>
+      </section>
+      <div class="columns">
+        <section id="trades" class="card" aria-labelledby="trades-title">
+          <div class="card-head">
+            <div>
+              <h2 id="trades-title">Журнал сделок</h2>
+              <p id="trade-summary">Сделки из выбранного прогона</p>
+            </div>
+            <button
+              id="toggle-trades"
+              class="text-button"
+              type="button"
+              aria-expanded="false"
+              hidden
+            >
+              Все сделки
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Инструмент</th>
+                  <th scope="col">Вход</th>
+                  <th scope="col">Причина выхода</th>
+                  <th scope="col">Результат</th>
+                </tr>
+              </thead>
+              <tbody id="trade-body"></tbody>
+            </table>
+          </div>
+        </section>
+        <aside id="research" class="card" aria-labelledby="research-title">
+          <div class="card-head">
+            <div>
+              <h2 id="research-title">Данные и методика</h2>
+              <p>Что стоит за результатом</p>
+            </div>
+          </div>
+          <div id="research-lines" class="research"></div>
+        </aside>
+      </div>
+      <footer>
+        <span>Контур</span><span>Результаты исторической симуляции</span>
+      </footer>
+    </main>
+  </body>
+</html>
