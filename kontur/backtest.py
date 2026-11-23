@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from math import floor, isfinite
 
+from .contest import drawdown_score, profit_factor_score
+
 
 @dataclass(frozen=True)
 class RiskConfig:
@@ -44,7 +46,7 @@ def _price_out(reference_price, slippage_rate):
     return reference_price * (1 - slippage_rate)
 
 
-def _exit(bar, stop, target):
+def resolve_exit(bar, stop, target):
     if bar.low <= stop:
         return stop, "stop", None
     if bar.high >= target:
@@ -57,22 +59,6 @@ def _encode_evidence(item):
         key: value.isoformat() if isinstance(value, (datetime, date)) else value
         for key, value in asdict(item).items()
     }
-
-
-def _drawdown_points(drawdown_pct):
-    for limit, points in [(2, 25), (4, 20), (6, 15), (8, 10), (10, 5)]:
-        if drawdown_pct <= limit + 1e-9:
-            return points
-    return 0
-
-
-def _profit_factor_points(profit_factor, no_losses):
-    if no_losses:
-        return 15
-    for limit, points in [(1.50, 15), (1.20, 10), (1.00, 5)]:
-        if profit_factor is not None and profit_factor >= limit:
-            return points
-    return 0
 
 
 def _metrics(config, equity, trades, risk_halt_date):
@@ -98,8 +84,8 @@ def _metrics(config, equity, trades, risk_halt_date):
         "total_slippage": sum(trade["slippage"] for trade in trades),
         "risk_halt_date": risk_halt_date,
         "score_components": {
-            "drawdown": _drawdown_points(max_drawdown) if outcomes else None,
-            "profit_factor": _profit_factor_points(profit_factor, no_losses) if outcomes else None,
+            "drawdown": drawdown_score(max_drawdown) if outcomes else None,
+            "profit_factor": profit_factor_score(profit_factor, no_losses) if outcomes else None,
             "real_repeatability": None,
             "relative_return": None,
         },
@@ -186,7 +172,7 @@ def simulate(bars, predictions, score_field, config=None):
             daily_risk -= risk_reserved
             opened += 1
 
-            reference_exit, reason, exit_at = _exit(bar, stop, target)
+            reference_exit, reason, exit_at = resolve_exit(bar, stop, target)
             exit_price = _price_out(reference_exit, slippage_rate)
             exit_fee = exit_price * quantity * commission_rate
             proceeds = exit_price * quantity - exit_fee

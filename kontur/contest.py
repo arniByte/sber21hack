@@ -109,14 +109,15 @@ def contest_scores(metrics, actual_situations=0, actual_days=0,
         if all(key in strategy_checks for key in STRATEGY_CHECKS):
             quality = 2 * sum(strategy_checks.values())
 
+    is_actual = metrics.get("origin") == "execution_audit"
+    has_activity = is_actual or metrics.get("trade_count", 1) > 0
     components = {
         "financial_result": financial_result,
-        "drawdown": drawdown_score(metrics["max_drawdown_pct"]),
+        "drawdown": drawdown_score(metrics["max_drawdown_pct"]) if has_activity else None,
         "profit_factor": profit_factor_score(metrics.get("profit_factor"), metrics.get("no_losses", False)),
         "repeatability": repeatability,
         "strategy_quality": quality,
     }
-    is_actual = metrics.get("origin") == "execution_audit"
     concentration = metrics.get("concentration_pct")
     concentration_review = concentration is not None and concentration > 60
     known_points = sum(value for value in components.values() if value is not None)

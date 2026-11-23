@@ -19,7 +19,7 @@ const strategies = {
   market: { label: "Только рынок", color: "#337d8c", hue: 1.7 },
   momentum: { label: "Импульс цены", color: "#ab632f", hue: 3.3 },
 };
-const sources = { synthetic: "Синтетические данные", moex: "Котировки MOEX", csv: "Импорт CSV" };
+const sources = { synthetic: "Синтетические данные", moex: "Котировки MOEX", archive: "Рыночный архив", csv: "Импорт CSV" };
 const exitReasons = { stop: "Стоп", take_profit: "Цель", close: "Закрытие" };
 const topics = {
   comparison: "Как различаются стратегии",
@@ -88,7 +88,7 @@ function activeTrades() { return rows(strategy()?.trades); }
 
 function setReport(input) {
   report = validate(input);
-  strategyKey = "hybrid";
+  strategyKey = Object.hasOwn(strategies, input.preset?.agent) && input.strategies[input.preset.agent] ? input.preset.agent : "hybrid";
   metricKey = "equity";
   rangeDays = 0;
   filterDay = "";
@@ -97,6 +97,10 @@ function setReport(input) {
   closeAnswer(false);
 
   const meta = report.meta;
+  $("share-profile").hidden = !record(report.preset?.risk);
+  setText("profile-name", report.preset?.profile ? "Профиль · " + report.preset.profile : "Отчёт стратегии");
+  renderWindows();
+  renderMovers();
   const badge = $("source-badge");
   badge.hidden = false;
   badge.classList.toggle("demo", meta.dataset === "synthetic");
@@ -146,8 +150,10 @@ function renderStrategy() {
   renderChart();
   renderTrades();
   renderResearch();
+  if (!topic) closeAnswer(false);
   if (topic) showAnswer(topic);
-  redrawPrism(true);
+  $("prism").dataset.agent = strategyKey;
+  renderAccount();
 }
 
 function renderChart() {
@@ -248,6 +254,7 @@ function renderResearch() {
   const values = [
     ["Свечи / события", num(meta.bars) + " / " + num(meta.events)],
     ["Источник событий", meta.event_source],
+    ["Цель Ridge", report.preset?.objective === "exit" ? "До выхода по стопу, цели или закрытию" : "От открытия до закрытия"],
     ["Окна проверки", num(meta.folds)],
     ["Средняя ошибка прогноза", bps(diagnostics.mae_bps)],
     ["Комиссия / проскальзывание", bps(meta.commission_bps) + " / " + bps(meta.slippage_bps)],
@@ -394,7 +401,10 @@ $("report-file").addEventListener("change", async (event) => {
   const id = ++loadId;
   try {
     const text = await file.text();
-    if (id === loadId) setReport(JSON.parse(text));
+    if (id === loadId) {
+      setReport(JSON.parse(text));
+      $("ask-mishka").hidden = true;
+    }
   } catch (error) {
     if (id === loadId) showNotice(error instanceof SyntaxError ? "Файл не содержит корректный JSON." : error.message);
   }
@@ -411,6 +421,8 @@ async function initialize() {
     if (!response.ok) throw new Error("Отчёт недоступен");
     const input = await response.json();
     if (!loadId) setReport(input);
+    const capabilities = await fetch("/api/capabilities").then((res) => res.ok ? res.json() : {}).catch(() => ({}));
+    $("ask-mishka").hidden = loadId > 0 || capabilities.mishka !== true;
   } catch {
     if (loadId) return;
     setText("report-summary", "Откройте сохранённый JSON-отчёт.");
@@ -418,108 +430,229 @@ async function initialize() {
   }
 }
 
-// The prism uses the active series to vary its contour. Numeric values are on the chart.
-const prism = $("prism");
-const optics = prism.getContext("2d");
-function redrawPrism(animate = false) {
-  if (!optics || !prism.clientWidth || !prism.clientHeight) return;
-  const width = prism.clientWidth;
-  const height = prism.clientHeight;
-  const ratio = Math.min(devicePixelRatio || 1, 1.4);
-  prism.width = Math.round(width * ratio);
-  prism.height = Math.round(height * ratio);
-  optics.scale(ratio, ratio);
-  const x = width * 0.65;
-  const y = height * 0.49;
-  const radius = Math.min(height * 0.55, width * 0.47);
-  const hue = strategies[strategyKey].hue;
-  const series = rows(strategy()?.equity).filter((point) => finite(point.equity)).slice(-180);
-  const low = series.reduce((value, point) => Math.min(value, point.equity), Infinity);
-  const high = series.reduce((value, point) => Math.max(value, point.equity), -Infinity);
-  const samples = series.map((point) => (point.equity - low) / Math.max(1, high - low) - 0.5);
-
-  const mist = optics.createRadialGradient(x, y, 0, x, y, radius * 1.66);
-  mist.addColorStop(0, "#88799689");
-  mist.addColorStop(0.42, "#564e9b55");
-  mist.addColorStop(0.75, "#9272c120");
-  mist.addColorStop(1, "#51457400");
-  optics.fillStyle = mist;
-  optics.fillRect(0, 0, width, height);
-
-  const illumination = optics.createConicGradient(-1.3 + hue / 5, x, y);
-  for (const [at, color] of [[0, "#f8c877"], [0.13, "#d989b7"], [0.34, "#6360bf"], [0.53, "#8dc9d7"], [0.68, "#95ccab"], [0.84, "#b091ea"], [1, "#f8c877"]]) {
-    illumination.addColorStop(at, color);
-  }
-  const shape = (angle, amount) => {
-    const deviation = samples.length ? samples[Math.floor(angle / (2 * Math.PI) * samples.length) % samples.length] : 0;
-    const rim = 1 + 0.072 * Math.sin(3 * angle + hue) + 0.034 * Math.cos(6 * angle - hue) + 0.035 * deviation;
-    const r = radius * amount * rim;
-    return [x + r * Math.cos(angle) * 1.13, y + r * Math.sin(angle) * 0.83];
-  };
-  const contour = (amount, backward = false) => {
-    for (let i = 0; i <= 240; i++) {
-      const angle = (backward ? 240 - i : i) / 240 * 2 * Math.PI;
-      const point = shape(angle, amount);
-      if (!i) optics.moveTo(...point);
-      else optics.lineTo(...point);
+for (const button of document.querySelectorAll("[data-view]")) {
+  button.addEventListener("click", () => {
+    for (const item of document.querySelectorAll("[data-view]")) {
+      const selected = item === button;
+      item.setAttribute("aria-pressed", String(selected));
+      $(item.dataset.view).hidden = !selected;
     }
-    optics.closePath();
-  };
-  optics.save();
-  optics.beginPath();
-  contour(1.06);
-  contour(0.42, true);
-  optics.shadowColor = "#b6a0ff";
-  optics.shadowBlur = 28;
-  optics.globalAlpha = 0.76;
-  optics.fillStyle = illumination;
-  optics.fill("evenodd");
-  optics.restore();
+  });
+}
 
-  optics.save();
-  optics.beginPath();
-  contour(1.06);
-  optics.clip();
-  const shading = optics.createRadialGradient(x, y, radius * 0.1, x, y, radius * 1.16);
-  shading.addColorStop(0, "#171621");
-  shading.addColorStop(0.39, "#171621f7");
-  shading.addColorStop(0.59, "#231f45ab");
-  shading.addColorStop(0.78, "#251e4a21");
-  shading.addColorStop(0.94, "#efddf51a");
-  shading.addColorStop(1, "#29213b91");
-  optics.fillStyle = shading;
-  optics.fillRect(0, 0, width, height);
-
-  for (let i = 0; i < 370; i++) {
-    const a = i / 370 * 2 * Math.PI;
-    const stroke = Math.sin(i * 15.719 + 0.71) * 0.5 + 0.5;
-    const p0 = shape(a, 0.43 + stroke * 0.08);
-    const p1 = shape((a + 0.073) % (Math.PI * 2), 0.70 + stroke * 0.05);
-    const p2 = shape((a + 0.024) % (Math.PI * 2), 0.99 + stroke * 0.073);
-    optics.beginPath();
-    optics.moveTo(...p0);
-    optics.quadraticCurveTo(...p1, ...p2);
-    optics.strokeStyle = i % 5 ? `rgba(248,235,251,${0.05 + stroke * 0.23})` : "#30222e44";
-    optics.lineWidth = 0.57 + stroke * 0.66;
-    optics.stroke();
+function renderWindows() {
+  const list = $("window-list");
+  list.replaceChildren();
+  const windows = rows(report.horizons);
+  if (!windows.length) {
+    setText("windows-caption", "Для сравнения сроков пересчитайте отчёт с флагом --horizons.");
+    return;
   }
-  optics.restore();
-
-  for (let i = 0; i < 2100; i++) {
-    const px = ((i * 173) % 2111) / 2111 * width;
-    const py = ((i * 937) % 2113) / 2113 * height;
-    const distance = Math.hypot((px - x) / 1.13, (py - y) / 0.83) / radius;
-    if (distance < 0.42 || distance > 1.12) continue;
-    optics.fillStyle = i % 3 ? "#fff3" : "#170e3e52";
-    optics.fillRect(px, py, 0.8, 0.8);
-  }
-  if (animate && !motion.matches) {
-    prism.getAnimations().forEach((animation) => animation.cancel());
-    const opacity = Number(getComputedStyle(prism).opacity);
-    prism.animate([{ opacity: opacity * 0.25, transform: "scale(.97) rotate(-3deg)" }, { opacity, transform: "scale(1) rotate(0)" }], {
-      duration: 590, easing: "cubic-bezier(.2,.75,.25,1)",
-    });
+  const label = strategies[report.preset?.agent]?.label || "";
+  setText("windows-caption", [report.preset?.profile, label, "Каждый срок начинается с " + rub(report.meta.start_capital)].filter(Boolean).join(" · "));
+  for (const w of windows) {
+    const row = add("details", list, undefined, "window-row");
+    const summary = add("summary", row);
+    const title = {6: "6 месяцев", 12: "1 год", 24: "2 года", 60: "5 лет"}[w.months];
+    add("strong", summary, title);
+    if (!w.available || !record(w.metrics)) {
+      add("span", summary, "Мало истории");
+      add("p", row, "Для этого срока не хватает данных до начала окна обучения.");
+      continue;
+    }
+    const m = w.metrics;
+    const dates = dateLabel(w.start, fullDateFormat) + " — " + dateLabel(w.end, fullDateFormat);
+    add("span", summary, dates, "window-date");
+    add("strong", summary, pct(m.return_pct), tone(m.return_pct));
+    const grid = add("dl", row, undefined, "window-metrics");
+    for (const [name, value] of [
+      ["Чистый результат", signedRub(m.net_pnl)], ["Просадка", pct(m.max_drawdown_pct)],
+      ["Profit Factor", m.no_losses ? "∞" : num(m.profit_factor)], ["Ситуации", num(m.trade_count)],
+      ["Месяцы в плюсе¹", num(w.monthly?.positive) + " / " + num(w.monthly?.count)], ["Худший месяц¹", pct(w.monthly?.worst_pct)],
+      ["При удвоенных издержках", pct(w.stress_return_pct)], ["Остановка входов", m.risk_halt_date ? dateLabel(m.risk_halt_date, fullDateFormat) : "Лимит не достигнут"],
+      ["Просадка · из 25 баллов", num(m.score_components?.drawdown)],
+      ["Profit Factor · из 15 баллов", num(m.score_components?.profit_factor)],
+    ]) { const pair = add("div", grid); add("dt", pair, name); add("dd", pair, value); }
+    add("p", row, dates, "window-mobile-date");
+    const equity = Array.isArray(w.equity) ? w.equity.filter((p) =>
+      Array.isArray(p) && finite(Date.parse(p[0])) && finite(p[1])) : [];
+    if (equity.length > 1 && finite(report.meta.start_capital) && report.meta.start_capital > 0) {
+      const series = equity.map(([day, value]) => ({time: Date.parse(day), capital: 100 * (value / report.meta.start_capital - 1)}));
+      renderMiniChart(row, "Доходность. " + title + ". " + pct(m.return_pct), series,
+        [["capital", "#6950ca"]], Date.parse(m.risk_halt_date));
+    }
+    add("p", row, "¹ Учтены неполные месяцы на границах и месяцы без сделок. Баллы расчётные. Для конкурсной оценки нужны реальные исполнения.");
   }
 }
-new ResizeObserver(() => redrawPrism()).observe(prism);
+
+function renderMovers() {
+  const m = report.movers;
+  setText("market-caption", m ? dateLabel(m.previous) + " → " + dateLabel(m.as_of, fullDateFormat) +
+    " · По ценам закрытия · Бумаг в сравнении: " + num(m.count) : "Для сравнения нужны две торговые сессии.");
+  for (const group of ["gainers", "losers"]) {
+    const list = $(group);
+    list.replaceChildren();
+    const items = rows(m?.[group]);
+    if (!items.length) add("li", list, "Нет бумаг в этой группе.");
+    for (const item of items) {
+      const row = add("li", list);
+      const name = add("span", row, item.name);
+      add("small", name, item.symbol);
+      add("b", row, (item.change_pct > 0 ? "+" : "") + pct(item.change_pct), tone(item.change_pct));
+    }
+  }
+}
+
+$("share-profile").addEventListener("click", async () => {
+  const payload = {...report.preset, agent: strategyKey};
+  const file = new File([JSON.stringify(payload, null, 2)], "kontur-" + strategyKey + ".json", {type: "application/json"});
+  if (navigator.canShare?.({files: [file]})) {
+    try { await navigator.share({files: [file], title: "Контур · " + payload.profile}); return; }
+    catch (error) { if (error.name === "AbortError") return; }
+  }
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
+let audit;
+function compareAccount(body) {
+  const df = new Intl.DateTimeFormat("sv-SE", {timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit"});
+  const daily = new Map(audit.equity.map((mark) => [df.format(new Date(mark.timestamp)), mark]));
+  const matching = rows(strategy()?.equity).filter((point) => {
+    const mark = daily.get(point.date);
+    return mark && record(mark.open_positions) && !Object.keys(mark.open_positions).length && point.equity > 0 && mark.equity > 0;
+  });
+  if (matching.length < 2) {
+    add("p", body, "Для сравнения динамики нужны две общие даты с закрытыми позициями на последней отметке счёта.");
+    return;
+  }
+  const first = matching[0], last = matching.at(-1);
+  const liveStart = daily.get(first.date).equity;
+  const series = matching.map((point) => ({time: Date.parse(point.date),
+    model: 100 * (point.equity / first.equity - 1), account: 100 * (daily.get(point.date).equity / liveStart - 1)}));
+  const end = series.at(-1);
+  const drift = end.account - end.model;
+  const caption = "Счёт " + pct(end.account) + " · Модель " + pct(end.model) +
+    " · Разница " + num(drift) + " п.п.";
+  add("h3", body, "Счёт и симуляция", "compare-title");
+  add("p", body, dateLabel(first.date, fullDateFormat) + " — " + dateLabel(last.date, fullDateFormat) +
+    ". От общей начальной отметки. " + caption);
+  renderMiniChart(body, caption, series, [["model", "#6950ca"], ["account", "#237a72"]]);
+  add("p", body, "Зелёная линия — счёт, фиолетовая — модель. Учтены последние доступные отметки в совпавшие дни.");
+}
+
+function renderMiniChart(parent, caption, series, lines, halt) {
+  const canvas = add("canvas", parent, undefined, "mini-chart");
+  canvas.width = 1000; canvas.height = 180;
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", caption);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  let min = 0, max = 0;
+  for (const point of series) {
+    for (const [key] of lines) {
+      min = Math.min(min, point[key]);
+      max = Math.max(max, point[key]);
+    }
+  }
+  const start = series[0].time;
+  const duration = series.at(-1).time - start || 1;
+  const x = (time) => 4 + 992 * (time - start) / duration;
+  const y = (value) => max === min ? 90 : 168 - 156 * (value-min)/(max-min);
+  ctx.strokeStyle = "#dadbd5"; ctx.beginPath(); ctx.moveTo(0, y(0)); ctx.lineTo(1000, y(0)); ctx.stroke();
+  for (const [key, color] of lines) {
+    ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.beginPath();
+    series.forEach((v, i) => i ? ctx.lineTo(x(v.time), y(v[key])) : ctx.moveTo(x(v.time), y(v[key])));
+    ctx.stroke();
+  }
+  if (finite(halt)) {
+    const point = series.find((v) => v.time === halt);
+    if (!point) return;
+    ctx.strokeStyle = "#a33945";
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.moveTo(x(halt), 6); ctx.lineTo(x(halt), 174); ctx.stroke();
+    add("p", parent, "Пунктир отмечает остановку входов.");
+  }
+}
+
+function renderAccount() {
+  if (!audit) return;
+  const body = $("account-content");
+  body.replaceChildren();
+  const m = audit.metrics;
+  add("p", body, dateLabel(audit.start, fullDateFormat) + " — " + dateLabel(audit.end, fullDateFormat));
+  const grid = add("dl", body, undefined, "window-metrics");
+  for (const [name, value] of [["Результат счёта", signedRub(m.net_pnl)], ["Просадка по отметкам", pct(m.max_drawdown_pct)],
+      ["Закрытые ситуации", num(m.trade_count)], ["Торговые дни", num(m.trade_days)], ["Profit Factor", m.no_losses ? "∞" : num(m.profit_factor)]]) {
+    const entry = add("div", grid); add("dt", entry, name); add("dd", entry, value);
+  }
+  if (record(audit.contest?.components)) {
+    const score = add("details", body, undefined, "window-row");
+    add("summary", score, "Предварительная оценка");
+    const scores = add("dl", score, undefined, "window-metrics");
+    const components = audit.contest.components;
+    for (const [name, points, max] of [
+      ["Финансовый результат", components.financial_result, 40], ["Просадка", components.drawdown, 25],
+      ["Profit Factor", components.profit_factor, 15], ["Повторяемость", components.repeatability, 10],
+      ["Качество стратегии", components.strategy_quality, 10],
+    ]) {
+      const entry = add("div", scores); add("dt", entry, name); add("dd", entry, num(points) + " / " + max);
+    }
+    if (audit.contest.concentration_review) {
+      add("p", score, "Более 60% чистой прибыли получено в одной ситуации. Повторяемость требует отдельного подтверждения.");
+    }
+  }
+  const limit = strategy()?.risk?.max_drawdown_pct;
+  if (finite(limit)) add("p", body, "Лимит просадки выбранного профиля " + pct(limit) +
+    (m.max_drawdown_pct >= limit ? " достигнут." : " пока не достигнут."));
+  compareAccount(body);
+  const history = add("details", body, undefined, "window-row");
+  add("summary", history, "История переоценки · " + num(audit.equity.length));
+  const list = add("ol", history, undefined, "account-marks");
+  for (const mark of audit.equity) {
+    const item = add("li", list);
+    add("span", item, dateLabel(mark.timestamp, timeFormat));
+    add("strong", item, rub(mark.equity));
+  }
+}
+$("open-audit").addEventListener("click", () => $("audit-file").click());
+$("audit-file").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (data.metrics?.origin !== "execution_audit" || !finite(data.metrics.net_pnl) || !Array.isArray(data.equity) ||
+        !data.equity.length || !data.equity.every((p) => finite(p.equity) && Number.isFinite(Date.parse(p.timestamp)))) throw Error();
+    audit = data;
+    renderAccount();
+    showNotice("");
+  } catch { showNotice("Нужен JSON с результатом команды kontur audit."); }
+});
+
+$("ask-mishka").addEventListener("click", async () => {
+  const question = $("question").value.trim();
+  if (!question) { $("question").focus(); return; }
+  const button = $("ask-mishka");
+  const currentReport = report;
+  const agent = strategyKey;
+  topic = undefined;
+  button.disabled = true;
+  $("answer").hidden = false;
+  setText("answer-title", "Мишка · OpenRouter");
+  setText("answer-content", "Читает показатели отчёта…");
+  try {
+    const response = await fetch("/api/mishka", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({question, agent})});
+    const data = await response.json();
+    if (!response.ok) throw Error(data.error || "OpenRouter недоступен.");
+    if (currentReport === report && agent === strategyKey && !topic) setText("answer-content", data.answer);
+  } catch (error) {
+    if (currentReport === report && agent === strategyKey && !topic) setText("answer-content", error.message);
+  } finally { button.disabled = false; }
+});
 initialize();

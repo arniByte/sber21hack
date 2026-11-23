@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 import re
 from typing import TYPE_CHECKING, Iterable
@@ -289,6 +289,23 @@ def build_features(bars: Iterable[Bar], events: Iterable[Event] = ()) -> list[Fe
                 target, momentum, evidence,
             ))
     return sorted(output, key=lambda row: (row.signal_day, row.ticker))
+
+
+def execution_targets(rows, bars, risk):
+    """Only replace resolved labels. Features and all decision timestamps stay intact."""
+    from .backtest import resolve_exit
+
+    lookup = {(bar.symbol, bar.day): bar for bar in bars}
+    output = []
+    for row in rows:
+        if row.target is None:
+            output.append(row)
+            continue
+        bar = lookup[row.ticker, row.trade_day]
+        price, _, _ = resolve_exit(bar, bar.open * (1 - risk.stop_pct / 100),
+                                     bar.open * (1 + risk.take_profit_pct / 100))
+        output.append(replace(row, target=price / bar.open - 1))
+    return output
 
 
 def _diagnostics(predictions: list[Prediction], field: str) -> dict[str, float | int]:

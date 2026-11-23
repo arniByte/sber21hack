@@ -13,15 +13,12 @@ from pathlib import Path
 import sys
 from urllib.parse import urlsplit
 
+from .profiles import PROFILES, STRATEGIES, configuration
+
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 DEFAULT_SYMBOLS = ("SBER", "GAZP", "LKOH", "TATN")
 DEFAULT_LOTS = {"SBER": 10, "SBERP": 10, "GAZP": 10, "LKOH": 1, "TATN": 1, "YDEX": 1}
-STRATEGIES = {
-    "hybrid": ("События + рынок", "event_return"),
-    "market": ("Только рынок", "market_return"),
-    "momentum": ("Импульс цены", "momentum_return"),
-}
 
 
 def json_value(value):
@@ -99,10 +96,12 @@ def standalone_dashboard(output, report):
 
 
 def run_backtest(args):
-    from .backtest import RiskConfig, simulate
+    from .backtest import simulate
+    from .horizons import experiment
+    from .movers import movers
     from .contest import contest_scores
     from .data import load_bars, load_events, synthetic_data, write_bars, write_events
-    from .model import EVENT_ENCODER, FEATURE_NAMES, MODEL_ALPHA, MODEL_NAME, build_features, latest_forecast, walk_forward
+    from .model import EVENT_ENCODER, FEATURE_NAMES, MODEL_ALPHA, MODEL_NAME, build_features, execution_targets, latest_forecast, walk_forward
 
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -122,15 +121,18 @@ def run_backtest(args):
         raise ValueError("В наборе нет свечей.")
     symbols = sorted({bar.symbol for bar in bars})
     lot_sizes = {symbol: DEFAULT_LOTS[symbol] for symbol in symbols if symbol in DEFAULT_LOTS}
+    overrides = {}
     for item in args.lot:
         symbol, separator, lot = item.partition("=")
         if not separator or symbol.upper() not in symbols or int(lot) <= 0:
             raise ValueError(f"Передайте размер лота в виде ТИКЕР=КОЛИЧЕСТВО: {item}")
-        lot_sizes[symbol.upper()] = int(lot)
-    if missing := set(symbols) - lot_sizes.keys():
+        overrides[symbol.upper()] = int(lot)
+    selected_preset, risk = configuration(args.profile, args.preset, lot_sizes, overrides)
+    if missing := set(symbols) - risk.lot_sizes.keys():
         raise ValueError("Укажите --lot ТИКЕР=КОЛИЧЕСТВО для: " + ", ".join(sorted(missing)))
-    risk = RiskConfig(lot_sizes=lot_sizes)
     features = build_features(bars, events)
+    if selected_preset["objective"] == "exit":
+        features = execution_targets(features, bars, risk)
     forecast = walk_forward(features, holdout_days=args.holdout_days)
     if not forecast.predictions:
         raise ValueError("Недостаточно истории для проверки на отложенном периоде.")
@@ -174,8 +176,20 @@ def run_backtest(args):
         "strategies": strategies,
         "events": [display_event(event) for event in latest],
         "diagnostics": {**forecast.diagnostics, "fold_details": forecast.folds},
-        "contest": contest_scores(strategies["hybrid"]["metrics"]),
     }
+    agent = selected_preset["agent"]
+    payload["preset"] = selected_preset
+    payload["contest"] = contest_scores(strategies[agent]["metrics"])
+    snapshot = load_bars(args.market_snapshot) if args.market_snapshot else bars
+    if max(b.day for b in snapshot) > max(b.day for b in bars):
+        raise ValueError("Рейтинг рынка датирован позже отчёта.")
+    payload["movers"] = movers(snapshot)
+    if args.market_snapshot:
+        payload["meta"]["snapshot_sha256"] = input_hash(args.market_snapshot)
+    if args.horizons:
+        all_forecasts = walk_forward(features)
+        payload["horizons"] = experiment(bars, all_forecasts.predictions, STRATEGIES[agent][1], risk)
+    write_json(output / "preset.json", selected_preset)
     report_path = output / "report.json"
     write_json(report_path, payload)
     write_json(output / "latest-signals.json", {
@@ -227,11 +241,56 @@ def audit(args):
 
 
 class ReportHandler(BaseHTTPRequestHandler):
-    def __init__(self, *args, report, **kwargs):
+    def __init__(self, *args, report, mishka=False, **kwargs):
+        self.mishka = mishka
         self.report = report
         super().__init__(*args, **kwargs)
 
+    def send_json(self, status, data):
+        content = json.dumps(data, ensure_ascii=False).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(content)
+
+    def do_POST(self):
+        from .mishka import SLOTS, answer
+
+        if self.path != "/api/mishka" or not self.mishka:
+            return self.send_json(404, {"error": "Мишка отключён."})
+        local = {f"{name}:{self.server.server_port}" for name in ("127.0.0.1", "localhost")}
+        host = self.headers.get("Host")
+        if host not in local or self.headers.get("Origin") != "http://" + host:
+            return self.send_json(403, {"error": "Откройте панель на локальном сервере."})
+        if self.headers.get_content_type() != "application/json":
+            return self.send_json(415, {"error": "Требуется JSON."})
+        try:
+            size = int(self.headers.get("Content-Length", 0))
+            if not 0 < size <= 4096:
+                raise ValueError()
+            data = json.loads(self.rfile.read(size))
+            if not isinstance(data, dict):
+                raise ValueError()
+        except (UnicodeError, ValueError):
+            return self.send_json(400, {"error": "Некорректный запрос."})
+        if not SLOTS.acquire(blocking=False):
+            return self.send_json(429, {"error": "Дождитесь ответа на предыдущий вопрос."})
+        try:
+            report = json.loads(self.report.read_text(encoding="utf-8"))
+            message = answer(report, data.get("agent"), data.get("question"))
+        except ValueError as error:
+            return self.send_json(400, {"error": str(error)})
+        except RuntimeError as error:
+            return self.send_json(502, {"error": str(error)})
+        finally:
+            SLOTS.release()
+        self.send_json(200, {"answer": message})
+
     def do_GET(self):
+        if self.path == "/api/capabilities":
+            return self.send_json(200, {"mishka": self.mishka})
         assets = {
             "/": (WEB / "index.html", "text/html"),
             "/index.html": (WEB / "index.html", "text/html"),
@@ -257,7 +316,10 @@ class ReportHandler(BaseHTTPRequestHandler):
 
 
 def serve(args):
-    handler = partial(ReportHandler, report=args.report.resolve())
+    from .mishka import enabled
+    if args.mishka and (args.host != "127.0.0.1" or not enabled()):
+        raise ValueError("Для Мишки нужны локальный адрес 127.0.0.1, OPENROUTER_MODEL и OPENROUTER_API_KEY.")
+    handler = partial(ReportHandler, report=args.report.resolve(), mishka=args.mishka)
     with ThreadingHTTPServer((args.host, args.port), handler) as server:
         print(f"Контур: http://{args.host}:{server.server_port}", flush=True)
         try:
@@ -275,10 +337,15 @@ def parser():
     historical = commands.add_parser("run", help="Обучить модели и провести историческую проверку")
     historical.add_argument("--bars", type=Path, required=True)
     historical.add_argument("--events", type=Path)
-    historical.add_argument("--dataset", choices=["moex", "csv"], default="csv")
+    historical.add_argument("--dataset", choices=["moex", "archive", "csv"], default="csv")
     for command in (demo, historical):
         command.add_argument("--output", type=Path, default=Path("results"))
         command.add_argument("--holdout-days", type=int, default=120)
+        command.add_argument("--horizons", action="store_true", help="Независимые прогоны за 6, 12, 24 и 60 месяцев")
+        profiles = command.add_mutually_exclusive_group()
+        profiles.add_argument("--profile", choices=PROFILES, default="baseline")
+        profiles.add_argument("--preset", type=Path, help="Применить экспортированный JSON-профиль")
+        command.add_argument("--market-snapshot", type=Path, help="Свечи широкого рынка для рейтинга")
         command.add_argument("--lot", action="append", default=[], metavar="ТИКЕР=КОЛИЧЕСТВО")
         command.set_defaults(action=run_backtest)
     download = commands.add_parser("download", help="Скачать дневные свечи MOEX ISS")
@@ -295,6 +362,7 @@ def parser():
     collect.set_defaults(action=collect_news)
     server = commands.add_parser("serve", help="Открыть локальную панель результатов")
     server.add_argument("--report", type=Path, default=Path("results/report.json"))
+    server.add_argument("--mishka", action="store_true", help="Включить Мишку через OpenRouter на локальном сервере")
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=8080)
     server.set_defaults(action=serve)
