@@ -1,9 +1,10 @@
 """Compare independent calendar periods and alternative position sizing."""
 
+from dataclasses import asdict, replace
 from statistics import median
 
 from .horizons import months_before
-from .swing import STRATEGIES, forecasts, replay, shared_calendar
+from .swing import PROFILES, STRATEGIES, forecasts, replay, shared_calendar
 
 
 def summarize(windows):
@@ -31,7 +32,7 @@ def decade_study(bars, lots, holdout_after=None):
         if not days_in_window or days[0] > start or days_in_window[0] < first_signal:
             return None
         selected = signals[strategy]
-        params = {"forecast_gate": strategy == "ridge"}
+        params = {"forecast_gate": strategy == "ridge", "rules": PROFILES[strategy]}
         result = replay(days_in_window, book, selected, lots, **params)
         stats = {"start": days_in_window[0], "end": days_in_window[-1], "months": months,
                  "sessions": len(days_in_window), **result["metrics"]}
@@ -42,6 +43,11 @@ def decade_study(bars, lots, holdout_after=None):
             stressed = replay(days_in_window, book, selected, lots, cost_bps=10, **params)
             stats.update(equity=result["equity"], fixed_size_pct=fixed["metrics"]["return_pct"],
                          stress_pct=stressed["metrics"]["return_pct"])
+            if strategy in ("rotation", "pullback"):
+                reference = PROFILES["trend"]
+                matched = replace(PROFILES[strategy], position=reference.position, risk=reference.risk)
+                comparable = replay(days_in_window, book, selected, lots, rules=matched)
+                stats["matched_risk_pct"] = comparable["metrics"]["return_pct"]
         return stats, result["trades"]
 
     report = {"sample_start": days[0], "sample_end": end, "oos_start": first_signal, "symbols": symbols,
@@ -60,7 +66,7 @@ def decade_study(bars, lots, holdout_after=None):
                   if (result := window(12, offset, key))]
         rolling = [result[0] for offset in range(0, 109, 3)
                    if (result := window(12, offset, key))]
-        report["strategies"][key] = {"label": label, "horizons": periods, "annual": annual,
+        report["strategies"][key] = {"label": label, "rules": asdict(PROFILES[key]), "horizons": periods, "annual": annual,
                                     "annual_summary": summarize(annual), "rolling": rolling,
                                     "rolling_summary": summarize(rolling)}
         if holdout_after:

@@ -6,7 +6,7 @@ from unittest.mock import patch
 from kontur.data import Bar
 from kontur.research import dossier, messages, review
 from kontur.series import extend_with_iss
-from kontur.swing import Signal, forecasts, replay, shared_calendar
+from kontur.swing import PROFILES, Signal, forecasts, replay, shared_calendar
 
 
 class DecadeTest(unittest.TestCase):
@@ -47,6 +47,19 @@ class DecadeTest(unittest.TestCase):
         self.assertTrue(all(fold["train_label_end"] < fold["first_signal"] for fold in folds))
         self.assertEqual(list(plays["ridge"]), list(plays["trend"]))
         self.assertEqual(list(plays["ridge"])[-1], days[-1])
+
+    def test_rotation_trails_prior_close_and_exits_before_later_low(self):
+        monday = date(2024, 4, 1)
+        days = [monday + timedelta(days=i) for i in (0, 1, 7)]
+        bars = [Bar("SBER", days[0], 100, 115, 99, 110, 1000),
+                Bar("SBER", days[1], 105, 117, 104.75, 112, 1000),
+                Bar("SBER", days[2], 108, 111, 92, 108, 1000)]
+        days, _, book = shared_calendar(bars)
+        result = replay(days, book, {days[0]: [Signal("SBER", 1)], days[2]: []}, {"SBER": 1},
+                        cost_bps=0, rules=PROFILES["rotation"])
+        self.assertEqual(len(result["trades"]), 1)
+        trade = result["trades"][0]
+        self.assertEqual((trade["exit_day"], trade["exit_price"], trade["reason"]), (days[2], 108, "rotation"))
 
     def test_splice_preserves_archive_and_converts_only_new_volume(self):
         first = date(2026, 8, 24)

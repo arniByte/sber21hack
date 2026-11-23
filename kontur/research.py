@@ -14,21 +14,21 @@ SYSTEM = (
 )
 ROLES = {
     "hypothesis": SYSTEM + (
-        "Ты исследователь торговых закономерностей. Сравни простой тренд и Ridge. "
+        "Ты исследователь торговых закономерностей. Сравни пятисессионный тренд, Ridge и доступные альтернативы. "
         "Объясни расхождение 5 и 10 лет, эффект реинвестирования и один опровержимый следующий тест. "
         "Укажи контроль, метрику успеха и периоды, на которых настройки должны быть заморожены. "
         "Разделы ответа: Наблюдение, Гипотеза, Проверка."
     ),
     "risk": SYSTEM + (
         "Ты независимый рецензент риска. Проверь худшее годовое окно, долю прибыльных окон, "
-        "двойные издержки, концентрацию, различие между просадкой в симуляции и просадкой в исполнениях. "
+        "двойные издержки, концентрацию, сравнение при едином бюджете риска, различие между просадкой в симуляции и просадкой в исполнениях. "
         "Проверь возможные смещения календаря, фондового состава, дивидендов, лотов и цен исполнения. "
         "Заверши решением о готовности к независимой проверке и перечисли минимально нужные доказательства. "
         "Разделы ответа: Результат, Ограничения, Критерии допуска."
     ),
 }
 PERIOD_FIELDS = (
-    "months", "start", "end", "return_pct", "cagr_pct", "fixed_size_pct", "stress_pct", "drawdown_pct",
+    "months", "start", "end", "return_pct", "cagr_pct", "fixed_size_pct", "matched_risk_pct", "stress_pct", "drawdown_pct",
     "profit_factor", "no_losses", "trade_count", "concentration_pct", "drawdown_points", "pf_points", "halt",
 )
 LIMITATIONS = (
@@ -59,7 +59,9 @@ def dossier(study):
     )}
     context["limitations"] = LIMITATIONS
     context["strategies"] = {}
-    for name in ("trend", "ridge"):
+    for name in ("trend", "ridge", "rotation", "pullback"):
+        if name not in study["strategies"]:
+            continue
         strategy = study["strategies"][name]
         context["strategies"][name] = {
             "horizons": [period_metrics(w) for w in strategy["horizons"] if w["available"]],
@@ -68,6 +70,10 @@ def dossier(study):
         }
         if strategy.get("fresh"):
             context["strategies"][name]["fresh"] = period_metrics(strategy["fresh"])
+        if isinstance(strategy.get("rules"), dict):
+            context["strategies"][name]["rules"] = {
+                key: strategy["rules"][key] for key in ("sessions", "stop", "position", "risk")
+            }
     return context
 
 

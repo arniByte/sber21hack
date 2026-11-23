@@ -33,7 +33,7 @@ python -m kontur serve --report results/contest/report.json
 
 ## Проверка до 10 лет
 
-Два многодневных варианта проверены на 11 736 дневных свечах. Простой тренд дал +2,38% за 10 лет, но только 4 из 10 независимых годовых окон закрылись в плюсе. В панели откройте «10 лет» для сравнения с Ridge, фиксированного размера позиции и двойных издержек. [Подробные результаты](docs/decade-results.md)
+В панели «10 лет» сравниваются пятисессионный тренд, Ridge, недельная ротация и покупка отката. На архиве до 20 ноября 2026 года ротация дала +15,97% за 10 лет и +11,53% при двойных издержках. На свежем отрезке с 8 сентября пятисессионный тренд дал +2,90%, ротация −0,36%. [Исходный эксперимент и данные](docs/decade-results.md) · [Сравнение новых стратегий](docs/rotation-results.md)
 
 ```bash
 python scripts/prepare_market.py --start 2015-01-01 --output data/decade
@@ -43,7 +43,7 @@ python -m kontur run --dataset archive --bars data/decade/market-bars.csv \
 python -m kontur research --report results/decade/decade-study.json --output results/decade/research.json
 ```
 
-Откройте `results/decade/dashboard.html`. Файлы `decade-study.json` и `study-trades.csv` содержат статистику окон, границы обучения и журнал десятилетних сделок. `research` сохраняет сводку и системные промпты локально. Чтобы получить две независимые рецензии, задайте `OPENROUTER_API_KEY` и `OPENROUTER_MODEL` и повторите команду с `--send`. Ключ хранится в окружении. [Протокол проверки](docs/robustness-protocol.md)
+Откройте `results/decade/dashboard.html`. Файлы `decade-study.json` и `study-trades.csv` содержат статистику окон, границы обучения и журнал десятилетних сделок. `research` сохраняет сводку и системные промпты локально. Чтобы получить две независимые рецензии, задайте `OPENROUTER_API_KEY` и `OPENROUTER_MODEL` и повторите команду с `--send`. В Codex Cloud добавьте ключ в «Секретах» среды, а модель задайте обычной переменной. Ключ используется сервером для запросов к `openrouter.ai`. [Протокол проверки](docs/robustness-protocol.md)
 
 Для воспроизведения более свежего окна установите дату окончания скачивания 22 ноября и оставьте границу проверки 7 сентября.
 

@@ -14,15 +14,34 @@ from .contest import CAPITAL, drawdown_score, profit_factor_score
 
 HOLD = 5
 STOP = 0.03
-POSITION = 0.15
-RISK = 0.0045
 SOFT_DRAWDOWN = 0.02
 HALT_DRAWDOWN = 0.08
 TRAIN_SESSIONS = 252
 REFIT_SESSIONS = 63
 FEATURES = ("return_5", "return_20", "return_60", "distance_sma_60", "volatility_20",
             "range_20", "breadth_60")
-STRATEGIES = {"trend": "Тренд · 5 сессий", "ridge": "Ridge · 5 сессий"}
+STRATEGIES = {
+    "trend": "Тренд · 5 сессий",
+    "ridge": "Ridge · 5 сессий",
+    "rotation": "Недельная ротация",
+    "pullback": "Покупка отката",
+}
+
+
+@dataclass(frozen=True)
+class Rules:
+    sessions: int | None = HOLD
+    stop: float = STOP
+    position: float = .15
+    risk: float = .0045
+
+
+PROFILES = {
+    "trend": Rules(),
+    "ridge": Rules(),
+    "rotation": Rules(None, .05, .30, .012),
+    "pullback": Rules(7, .04, .30, .012),
+}
 
 
 @dataclass(frozen=True)
@@ -48,6 +67,32 @@ def exit_price(bar, stop, timed):
     if bar.low <= stop:
         return stop, "stop"
     return (bar.close, "close") if timed else (None, None)
+
+
+def rule_signals(days, symbols, prices, first):
+    """Candidates known at the last close, evaluated on the next session."""
+    rotation, pullback = {}, {}
+    for index in range(max(120, first), len(days) - 1):
+        signal_day, trade_day = days[index:index+2]
+        if (trade_day - signal_day).days > 7:
+            continue
+        level = prices[index]
+        base = level > prices[index-119:index+1].mean(axis=0)
+        recent = prices[index-20:index+1]
+        vol = np.maximum((recent[1:] / recent[:-1] - 1).std(axis=0), .001)
+        ret_3 = level / prices[index-3] - 1
+        ret_20 = level / recent[0] - 1
+        pullback[trade_day] = [Signal(symbol, float(-ret_3[k] / vol[k]))
+                               for k, symbol in enumerate(symbols)
+                               if base[k] and ret_20[k] > 0 and ret_3[k] < -vol[k]]
+        if trade_day.isocalendar()[:2] == signal_day.isocalendar()[:2]:
+            continue
+        ret_60 = level / prices[index-60] - 1
+        ret_120 = level / prices[index-120] - 1
+        rotation[trade_day] = [Signal(symbol, float((ret_60[k] + ret_120[k]) / (2 * vol[k])))
+                               for k, symbol in enumerate(symbols) if base[k] and ret_60[k] > 0]
+    return {"rotation": rotation, "pullback": pullback}
+
 
 
 def forecasts(days, symbols, book):
@@ -81,7 +126,7 @@ def forecasts(days, symbols, book):
         raise ValueError("Недостаточно истории для обучения и отложенного прогноза.")
     fit_features = np.array(x)
     labels = np.array(y)
-    results = {key: {} for key in STRATEGIES}
+    results = {"trend": {}, "ridge": {}}
     folds = []
     eligible = np.array([(right-left).days <= 7 for left, right in zip(days[60:-1], days[61:])])
     with threadpool_limits(limits=1):
@@ -106,6 +151,7 @@ def forecasts(days, symbols, book):
                                          for k in candidates]
                 results["ridge"][day] = [Signal(symbols[k], float(values[row - start][k]))
                                          for k in candidates]
+    results.update(rule_signals(days, symbols, prices, 60 + TRAIN_SESSIONS + HOLD))
     return results, folds
 
 
@@ -119,45 +165,56 @@ class Position:
     entry_index: int
 
 
-def replay(days, book, signals, lots, *, forecast_gate=False, reinvest=True, cost_bps=5, capital=CAPITAL):
+def replay(days, book, signals, lots, *, forecast_gate=False, reinvest=True, cost_bps=5,
+           capital=CAPITAL, rules=PROFILES["trend"]):
     cost = cost_bps / 10_000
     buy = (1 + cost) ** 2
     sell = (1 - cost) ** 2
     gate = buy / sell - 1 + .001
     cash = equity = peak = capital
     position = None
+    trailing_close = 0.0
     halt = None
     curve, trades = [], []
     exposed = 0
     for index, day in enumerate(days):
+        candidates = sorted(signals.get(day, ()), key=lambda signal: (-signal.score, signal.ticker))
         if position is None and halt is None:
             budget = equity if reinvest else capital
             scale = .5 if equity <= peak * (1 - SOFT_DRAWDOWN) else 1
-            candidates = sorted(signals.get(day, ()), key=lambda signal: (-signal.score, signal.ticker))
             for signal in candidates:
                 if forecast_gate and signal.score <= gate:
                     break
                 opening = book[day][signal.ticker].open
                 unit_cost = opening * buy
-                unit_risk = unit_cost - opening * (1 - STOP) * sell
+                unit_risk = unit_cost - opening * (1 - rules.stop) * sell
                 lot = lots[signal.ticker]
-                quantity = floor(min(cash / unit_cost, budget * scale * POSITION / unit_cost,
-                                     budget * scale * RISK / unit_risk) / lot) * lot
+                quantity = floor(min(cash / unit_cost, budget * scale * rules.position / unit_cost,
+                                     budget * scale * rules.risk / unit_risk) / lot) * lot
                 if quantity:
                     position = Position(signal.ticker, quantity, opening, unit_cost * quantity, day, index)
+                    trailing_close = opening
                     cash -= position.cost
                     break
         heat = equity = cash
         if position:
             exposed += 1
             bar = book[day][position.ticker]
-            stop = position.opening * (1 - STOP)
-            timed = index - position.entry_index + 1 >= HOLD or index == len(days) - 1
-            reference, reason = exit_price(bar, stop, timed)
-            # Once the stop has fired, the position no longer bears later bar lows.
-            adverse = bar.open if reason == "gap" else max(bar.low, stop)
+            rotates = rules.sessions is None
+            stop_base = trailing_close if rotates else position.opening
+            stop = stop_base * (1 - rules.stop)
+            limit = not rotates and index - position.entry_index + 1 >= rules.sessions
+            dropped = (rotates and day in signals and position.entry_day != day
+                       and position.ticker not in {s.ticker for s in candidates[:2]})
+            if dropped and bar.open > stop:
+                reference, reason = bar.open, "rotation"
+            else:
+                reference, reason = exit_price(bar, stop, limit or index == len(days) - 1)
+            # Stops and planned opening exits remove exposure to later lows.
+            adverse = bar.open if reason in {"gap", "rotation"} else max(bar.low, stop)
             heat += adverse * sell * position.quantity
             if reference is None:
+                trailing_close = max(trailing_close, bar.close)
                 equity += bar.close * sell * position.quantity
             else:
                 proceeds = reference * sell * position.quantity

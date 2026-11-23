@@ -500,10 +500,13 @@ function renderDecade(key) {
   output.replaceChildren();
   if (!model) return;
   for (const button of document.querySelectorAll("[data-study]")) {
+    button.hidden = !record(study.strategies[button.dataset.study]);
     button.setAttribute("aria-pressed", String(button.dataset.study === key));
   }
-  setText("decade-period", "Дневные свечи по " + dateLabel(study.sample_end, fullDateFormat) +
-    " · До пяти сессий в позиции · Старт " + rub(report.meta.start_capital));
+  const rules = model.rules;
+  const holding = rules?.sessions === null ? "Решение раз в неделю" : "До " + (rules?.sessions ?? 5) + " сессий в позиции";
+  const cap = finite(rules?.position) ? " · До " + pct(rules.position * 100) + " капитала в позиции" : "";
+  setText("decade-period", "Дневные свечи по " + dateLabel(study.sample_end, fullDateFormat) + " · " + holding + cap);
   const annual = model.annual_summary;
   const rolling = model.rolling_summary;
   const grid = add("div", output, undefined, "study-summary");
@@ -532,6 +535,7 @@ function renderDecade(key) {
       ["Чистый результат", signedRub(w.net_pnl)], ["Капитал на конец", rub(capital + w.net_pnl)],
       ...(finite(w.cagr_pct) ? [["Годовой темп (CAGR)", pct(w.cagr_pct)]] : []),
       ["Фиксированный размер от старта", pct(w.fixed_size_pct)], ["Двойные издержки", pct(w.stress_pct)],
+      ...(finite(w.matched_risk_pct) ? [["При бюджете риска пятисессионного тренда", pct(w.matched_risk_pct)]] : []),
       ["Просадка", pct(w.drawdown_pct)], ["Profit Factor", w.no_losses ? "∞" : num(w.profit_factor)],
       ["Закрыто позиций", num(w.trade_count)], ["Сессии в позиции", num(w.exposed_days) + " / " + num(w.sessions)],
       ["Доля лучшей сделки", pct(w.concentration_pct)],
