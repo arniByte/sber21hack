@@ -100,6 +100,10 @@ function setReport(input) {
   $("share-profile").hidden = !record(report.preset?.risk);
   setText("profile-name", report.preset?.profile ? "Профиль · " + report.preset.profile : "Отчёт стратегии");
   renderWindows();
+  const decadeTab = document.querySelector('[data-view="decade"]');
+  decadeTab.hidden = !record(report.long_study?.strategies);
+  if (decadeTab.hidden && !$("decade").hidden) document.querySelector('[data-view="performance"]').click();
+  renderDecade("trend");
   renderMovers();
   const badge = $("source-badge");
   badge.hidden = false;
@@ -482,6 +486,74 @@ function renderWindows() {
         [["capital", "#6950ca"]], Date.parse(m.risk_halt_date));
     }
     add("p", row, "¹ Учтены неполные месяцы на границах и месяцы без сделок. Баллы расчётные. Для конкурсной оценки нужны реальные исполнения.");
+  }
+}
+
+for (const button of document.querySelectorAll("[data-study]")) {
+  button.addEventListener("click", () => renderDecade(button.dataset.study));
+}
+
+function renderDecade(key) {
+  const study = report.long_study;
+  const model = study?.strategies?.[key];
+  const output = $("decade-results");
+  output.replaceChildren();
+  if (!model) return;
+  for (const button of document.querySelectorAll("[data-study]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.study === key));
+  }
+  setText("decade-period", "Дневные свечи по " + dateLabel(study.sample_end, fullDateFormat) +
+    " · До пяти сессий в позиции · Старт " + rub(report.meta.start_capital));
+  const annual = model.annual_summary;
+  const rolling = model.rolling_summary;
+  const grid = add("div", output, undefined, "study-summary");
+  for (const [label, item] of [["Независимые годы", annual], ["Скользящие 12 месяцев", rolling]]) {
+    if (!item?.count) continue;
+    const card = add("div", grid);
+    add("h3", card, label);
+    add("strong", card, num(item.profitable) + " / " + num(item.count));
+    add("p", card, "Периоды в плюсе");
+    if (item.worst) add("p", card, "Худший результат " + pct(item.worst.return_pct) +
+      " · до " + dateLabel(item.worst.end, fullDateFormat));
+  }
+  const capital = report.meta.start_capital;
+  const labels = {6: "6 месяцев", 12: "1 год", 24: "2 года", 60: "5 лет", 120: "10 лет"};
+  const horizons = rows(model.horizons).reverse();
+  if (record(model.fresh)) horizons.unshift({...model.fresh, available: true});
+  for (const w of horizons) {
+    const item = add("details", output, undefined, "window-row");
+    const summary = add("summary", item);
+    const label = labels[w.months] || "Свежий период";
+    add("strong", summary, label);
+    if (!w.available) { add("span", summary, "Мало истории"); continue; }
+    add("strong", summary, pct(w.return_pct), tone(w.return_pct));
+    const metrics = add("dl", item, undefined, "window-metrics");
+    for (const [name, value] of [
+      ["Чистый результат", signedRub(w.net_pnl)], ["Капитал на конец", rub(capital + w.net_pnl)],
+      ...(finite(w.cagr_pct) ? [["Годовой темп (CAGR)", pct(w.cagr_pct)]] : []),
+      ["Фиксированный размер от старта", pct(w.fixed_size_pct)], ["Двойные издержки", pct(w.stress_pct)],
+      ["Просадка", pct(w.drawdown_pct)], ["Profit Factor", w.no_losses ? "∞" : num(w.profit_factor)],
+      ["Закрыто позиций", num(w.trade_count)], ["Сессии в позиции", num(w.exposed_days) + " / " + num(w.sessions)],
+      ["Доля лучшей сделки", pct(w.concentration_pct)],
+      ["Просадка · из 25 баллов", num(w.drawdown_points)], ["Profit Factor · из 15 баллов", num(w.pf_points)],
+    ]) {
+      const pair = add("div", metrics);
+      add("dt", pair, name); add("dd", pair, value);
+    }
+    add("p", item, dateLabel(w.start, fullDateFormat) + " — " + dateLabel(w.end, fullDateFormat));
+    if (finite(capital) && capital > 0 && w.equity?.length > 1) {
+      const series = w.equity.map(([day, value]) => ({time: Date.parse(day), value: 100 * (value / capital - 1)}));
+      renderMiniChart(item, label + " · Доходность " + pct(w.return_pct), series,
+        [["value", "#6950ca"]], Date.parse(w.halt));
+    }
+  }
+  const annualDetails = add("details", output, undefined, "window-row");
+  add("summary", annualDetails, "Результаты по каждому году");
+  const list = add("ol", annualDetails, undefined, "study-years");
+  for (const w of rows(model.annual)) {
+    const line = add("li", list);
+    add("span", line, dateLabel(w.end, fullDateFormat));
+    add("strong", line, pct(w.return_pct), tone(w.return_pct));
   }
 }
 

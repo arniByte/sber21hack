@@ -78,6 +78,7 @@
     <nav class="views" aria-label="Рабочая область">
       <button type="button" data-view="performance" aria-pressed="true">Динамика</button>
       <button type="button" data-view="windows" aria-pressed="false">Горизонты</button>
+      <button type="button" data-view="decade" aria-pressed="false" hidden>10 лет</button>
       <button type="button" data-view="market" aria-pressed="false">Рынок</button>
       <button type="button" data-view="account" aria-pressed="false">Счёт</button>
     </nav>
@@ -110,6 +111,15 @@
     <section class="chart-card workspace-pane" id="windows" aria-labelledby="windows-title" hidden>
       <header><h2 id="windows-title">Проверка по горизонтам</h2><p id="windows-caption"></p></header>
       <div id="window-list"></div>
+    </section>
+    <section class="chart-card workspace-pane" id="decade" aria-labelledby="decade-title" hidden>
+      <header><h2 id="decade-title">Устойчивость на разных периодах</h2>
+        <p id="decade-period"></p></header>
+      <div class="metric-switch" aria-label="Стратегия на пяти сессиях">
+        <button type="button" data-study="trend" aria-pressed="true">Тренд</button>
+        <button type="button" data-study="ridge" aria-pressed="false">Ridge</button>
+      </div>
+      <div id="decade-results"></div>
     </section>
     <section class="chart-card workspace-pane" id="market" aria-labelledby="market-title" hidden>
       <header><h2 id="market-title">Движение рынка</h2><p id="market-caption"></p></header>

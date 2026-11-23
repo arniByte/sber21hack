@@ -31,6 +31,31 @@ python -m kontur serve --report results/contest/report.json
 
 Для демонстрации новостного конвейера без скачивания архива запустите `python -m kontur demo`. Демо генерирует синтетические цены и новости с заранее заданной зависимостью. [Руководство команды](docs/guide.md)
 
+## Проверка до 10 лет
+
+Два многодневных варианта проверены на 11 736 дневных свечах. Простой тренд дал +2,38% за 10 лет, но только 4 из 10 независимых годовых окон закрылись в плюсе. В панели откройте «10 лет» для сравнения с Ridge, фиксированного размера позиции и двойных издержек. [Подробные результаты](docs/decade-results.md)
+
+```bash
+python scripts/prepare_market.py --start 2015-01-01 --output data/decade
+python -m kontur run --dataset archive --bars data/decade/market-bars.csv \
+  --market-snapshot data/decade/market-snapshot.csv --profile contest --horizons --study \
+  --output results/decade
+python -m kontur research --report results/decade/decade-study.json --output results/decade/research.json
+```
+
+Откройте `results/decade/dashboard.html`. Файлы `decade-study.json` и `study-trades.csv` содержат статистику окон, границы обучения и журнал десятилетних сделок. `research` сохраняет сводку и системные промпты локально. Чтобы получить две независимые рецензии, задайте `OPENROUTER_API_KEY` и `OPENROUTER_MODEL` и повторите команду с `--send`. Ключ хранится в окружении. [Протокол проверки](docs/robustness-protocol.md)
+
+Для воспроизведения более свежего окна установите дату окончания скачивания 22 ноября и оставьте границу проверки 7 сентября.
+
+```bash
+python -m kontur download --from 2026-08-17 --to 2026-11-22 --output data/decade/iss.csv
+python -m kontur merge-iss --archive data/decade/market-bars.csv --iss data/decade/iss.csv \
+  --output data/decade/november.csv
+python -m kontur run --dataset moex --bars data/decade/november.csv --market-snapshot data/decade/iss.csv \
+  --profile contest --horizons --study --holdout-after 2026-09-07 --output results/november
+```
+
+
 ## Исторические данные и проверка
 
 ```bash

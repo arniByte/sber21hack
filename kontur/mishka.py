@@ -27,13 +27,19 @@ def answer(report, agent, question):
         context["windows"] = [{"months": w["months"], "return_pct": w["metrics"]["return_pct"],
                                "halt": w["metrics"]["risk_halt_date"]}
                               for w in report.get("horizons", []) if w["available"]]
-    payload = {"model": os.environ["OPENROUTER_MODEL"], "max_tokens": 420,
-               "messages": [{"role": "system", "content":
-                   "Ты Мишка, аналитик исторических симуляций Контур. Отвечай кратко по-русски. "
-                   "Числа бери из переданной сводки. Различай симуляцию и реальный счёт. "
-                   "Если данных недостаточно, укажи каких. Не обещай прибыль."},
-                            {"role": "user", "content": json.dumps({"summary": context, "question": question},
-                                                                   ensure_ascii=False)}]}
+    return complete([
+        {"role": "system", "content":
+         "Ты Мишка, аналитик исторических симуляций Контур. Отвечай кратко по-русски. "
+         "Числа бери из переданной сводки. Различай симуляцию и реальный счёт. "
+         "Если данных недостаточно, укажи каких. Не обещай прибыль."},
+        {"role": "user", "content": json.dumps({"summary": context, "question": question}, ensure_ascii=False)},
+    ])
+
+
+def complete(messages, *, max_tokens=420):
+    if not enabled():
+        raise ValueError("Задайте OPENROUTER_API_KEY и OPENROUTER_MODEL.")
+    payload = {"model": os.environ["OPENROUTER_MODEL"], "max_tokens": max_tokens, "messages": messages}
     req = Request(ENDPOINT, method="POST", data=json.dumps(payload).encode(),
                   headers={"Authorization": "Bearer " + os.environ["OPENROUTER_API_KEY"],
                            "Content-Type": "application/json"})

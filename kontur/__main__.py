@@ -189,6 +189,21 @@ def run_backtest(args):
     if args.horizons:
         all_forecasts = walk_forward(features)
         payload["horizons"] = experiment(bars, all_forecasts.predictions, STRATEGIES[agent][1], risk)
+    if args.holdout_after is not None and not args.study:
+        raise ValueError("--holdout-after используется с --study.")
+    if args.study:
+        from .study import decade_study
+
+        study, episodes = decade_study(bars, risk.lot_sizes, args.holdout_after)
+        study["bars_sha256"] = payload["meta"]["bars_sha256"]
+        payload["long_study"] = study
+        write_json(output / "decade-study.json", study)
+        with (output / "study-trades.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+            fields = ("strategy", "period", "symbol", "entry_day", "exit_day", "quantity", "entry_price",
+                      "exit_price", "net_pnl", "reason")
+            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(episodes)
     write_json(output / "preset.json", selected_preset)
     report_path = output / "report.json"
     write_json(report_path, payload)
@@ -207,6 +222,42 @@ def run_backtest(args):
         print(f"{strategy['label']}: {metrics['net_pnl']:+.2f} ₽, "
               f"просадка {metrics['max_drawdown_pct']:.2f}%, сделок {metrics['trade_count']}")
     print(f"Отчёт: {report_path}")
+
+
+def research_report(args):
+    from .mishka import enabled
+    from .research import ROLES, dossier, messages, review
+
+    try:
+        context = dossier(json.loads(args.report.read_text(encoding="utf-8")))
+    except (KeyError, TypeError) as error:
+        raise ValueError("Нужен корректный decade-study.json.") from error
+    roles = list(ROLES) if args.role == "both" else [args.role]
+    payload = {"dossier": context, "status": "prepared",
+               "requests": {role: messages(context, role) for role in roles}}
+    if args.send:
+        if not enabled():
+            raise ValueError("Задайте OPENROUTER_API_KEY и OPENROUTER_MODEL для отправки.")
+        payload.update(status="requested", responses=review(context, roles))
+    write_json(args.output, payload)
+    print(f"Ресерч: {args.output}")
+    if args.send and any(item["status"] != "answered" for item in payload["responses"].values()):
+        raise RuntimeError("Один или несколько ответов OpenRouter недоступны. Сводка сохранена.")
+
+
+def merge_history(args):
+    from .data import load_bars, write_bars
+    from .series import extend_with_iss
+
+    if args.output.resolve() in {args.archive.resolve(), args.iss.resolve()}:
+        raise ValueError("Выберите отдельный файл для объединённого архива.")
+    archive, official = load_bars(args.archive), load_bars(args.iss)
+    bars, checks = extend_with_iss(archive, official)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    write_bars(args.output, bars)
+    write_json(args.output.with_suffix(".sources.json"), {**checks,
+               "archive_sha256": input_hash(args.archive), "iss_sha256": input_hash(args.iss)})
+    print(f"{checks['new_sessions']} новых сессий по {checks['end']} → {args.output}")
 
 
 def pull_history(args):
@@ -342,12 +393,25 @@ def parser():
         command.add_argument("--output", type=Path, default=Path("results"))
         command.add_argument("--holdout-days", type=int, default=120)
         command.add_argument("--horizons", action="store_true", help="Независимые прогоны за 6, 12, 24 и 60 месяцев")
+        command.add_argument("--study", action="store_true", help="Многодневный эксперимент до 10 лет и независимые годовые окна")
+        command.add_argument("--holdout-after", type=date.fromisoformat, help="Отдельная симуляция после указанной даты")
         profiles = command.add_mutually_exclusive_group()
         profiles.add_argument("--profile", choices=PROFILES, default="baseline")
         profiles.add_argument("--preset", type=Path, help="Применить экспортированный JSON-профиль")
         command.add_argument("--market-snapshot", type=Path, help="Свечи широкого рынка для рейтинга")
         command.add_argument("--lot", action="append", default=[], metavar="ТИКЕР=КОЛИЧЕСТВО")
         command.set_defaults(action=run_backtest)
+    research = commands.add_parser("research", help="Подготовить сводку и запустить двух рецензентов по запросу")
+    research.add_argument("--report", type=Path, required=True, help="Файл decade-study.json")
+    research.add_argument("--output", type=Path, default=Path("results/research.json"))
+    research.add_argument("--role", choices=("both", "hypothesis", "risk"), default="both")
+    research.add_argument("--send", action="store_true", help="Передать агрегаты в OpenRouter")
+    research.set_defaults(action=research_report)
+    merge = commands.add_parser("merge-iss", help="Сверить пересечение и добавить к архиву свежие свечи ISS")
+    merge.add_argument("--archive", type=Path, required=True)
+    merge.add_argument("--iss", type=Path, required=True)
+    merge.add_argument("--output", type=Path, required=True)
+    merge.set_defaults(action=merge_history)
     download = commands.add_parser("download", help="Скачать дневные свечи MOEX ISS")
     download.add_argument("--symbols", nargs="+", default=DEFAULT_SYMBOLS)
     download.add_argument("--from", dest="start", type=date.fromisoformat, required=True)

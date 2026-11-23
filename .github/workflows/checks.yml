@@ -49,6 +49,13 @@ jobs:
               --market-snapshot data/market-snapshot.csv --profile "$profile" \
               --horizons --output "results/$profile"
           done
+      - name: Проверить многодневные варианты на архиве с 2015 года
+        run: |
+          python scripts/prepare_market.py --start 2015-01-01
+          python -m kontur run --dataset archive --bars data/market-bars.csv \
+            --market-snapshot data/market-snapshot.csv --profile contest \
+            --horizons --study --output results/decade
+          python -m kontur research --report results/decade/decade-study.json --output results/decade/research.json
       - uses: actions/upload-artifact@v4
         with:
           name: kontur-market
@@ -57,3 +64,6 @@ jobs:
             results/*/preset.json
             results/*/report.json
             results/*/simulated-trades.csv
+            results/decade/decade-study.json
+            results/decade/study-trades.csv
+            results/decade/research.json
