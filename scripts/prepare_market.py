@@ -3,6 +3,7 @@ import argparse
 import csv
 import hashlib
 import json
+from datetime import date
 from pathlib import Path
 from statistics import median
 from urllib.request import urlopen
@@ -43,7 +44,7 @@ def save(path, records):
         writer.writerows(records)
 
 
-def prepare(out):
+def prepare(out, start="2020-01-01"):
     cache = out / "archive"
     cache.mkdir(parents=True, exist_ok=True)
     latest = [{**row, "date": row["datetime_msk"][:10], "symbol": row["ticker"]}
@@ -68,11 +69,11 @@ def prepare(out):
         checks[ticker] = {"overlap_sessions": len(overlap), "max_close_gap_pct": max(delta)*100,
                           "volume_scale": factor}
         records.extend({**row, "symbol": ticker, "date": day}
-                       for day, row in old.items() if "2020-01-01" <= day < CUTOFF)
+                       for day, row in old.items() if start <= day < CUTOFF)
         records.extend({**row, "volume": float(row["volume"]) / factor}
                        for day, row in new.items() if day >= CUTOFF)
     save(out / "market-bars.csv", sorted(records, key=lambda row: (row["date"], row["symbol"])))
-    (out / "sources.json").write_text(json.dumps({"cutover": CUTOFF, "checks": checks,
+    (out / "sources.json").write_text(json.dumps({"start": start, "cutover": CUTOFF, "checks": checks,
         "source_hashes": DIGESTS, "as_of": days[-1]}, indent=2), encoding="utf-8")
     print(f"{len(records)} свечей; архив по {days[-1]} включительно.")
 
@@ -80,4 +81,6 @@ def prepare(out):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("data"))
-    prepare(parser.parse_args().output)
+    parser.add_argument("--start", type=date.fromisoformat, default=date(2020, 1, 1))
+    args = parser.parse_args()
+    prepare(args.output, args.start.isoformat())
