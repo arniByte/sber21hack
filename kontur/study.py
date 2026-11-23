@@ -41,7 +41,7 @@ def decade_study(bars, lots, holdout_after=None):
         if details:
             fixed = replay(days_in_window, book, selected, lots, reinvest=False, **params)
             stressed = replay(days_in_window, book, selected, lots, cost_bps=10, **params)
-            stats.update(equity=result["equity"], fixed_size_pct=fixed["metrics"]["return_pct"],
+            stats.update(equity=result["equity"], trades=result["trades"], fixed_size_pct=fixed["metrics"]["return_pct"],
                          stress_pct=stressed["metrics"]["return_pct"])
             if strategy in ("rotation", "pullback"):
                 reference = PROFILES["trend"]

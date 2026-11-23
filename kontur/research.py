@@ -81,7 +81,7 @@ def messages(context, role):
     if role not in ROLES:
         raise ValueError("Неизвестная роль рецензента.")
     return [{"role": "system", "content": ROLES[role]},
-            {"role": "user", "content": json.dumps(context, ensure_ascii=False, allow_nan=False)}]
+            {"role": "user", "content": json.dumps(context, ensure_ascii=False, allow_nan=False, separators=(",", ":"))}]
 
 
 def review(context, roles):

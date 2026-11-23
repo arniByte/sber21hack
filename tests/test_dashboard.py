@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from kontur.__main__ import standalone_dashboard
 
@@ -33,15 +34,18 @@ class Page(HTMLParser):
 
 
 class DashboardTest(unittest.TestCase):
-    def test_embeds_chart_before_app_and_escapes_report_as_text(self):
+    def test_embeds_report_before_app_without_external_resources(self):
         with TemporaryDirectory() as folder:
             report = Path(folder) / "report.json"
             dashboard = Path(folder) / "dashboard.html"
             payload = {"title": "</script><script>не код</script>"}
             report.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-            standalone_dashboard(dashboard, report)
+            app = Path(folder) / "app.js"
+            app.write_text("window.kontur = true", encoding="utf-8")
+            with patch("kontur.__main__.WEB_BUNDLE", app):
+                standalone_dashboard(dashboard, report)
             page = Page()
             page.feed(dashboard.read_text(encoding="utf-8"))
             self.assertFalse(page.assets)
-            self.assertEqual(page.scripts, [{}, {"id": "embedded-report", "type": "application/json"}, {"type": "module"}])
+            self.assertEqual(page.scripts, [{"id": "embedded-report", "type": "application/json"}, {}])
             self.assertEqual(json.loads(page.report), payload)

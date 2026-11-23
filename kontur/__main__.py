@@ -17,6 +17,8 @@ from .profiles import PROFILES, STRATEGIES, configuration
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
+WEB_BUNDLE = WEB / "dist" / "app.js"
+BUILD_FRONTEND = "Соберите интерфейс командами npm ci и npm run build из корня проекта."
 DEFAULT_SYMBOLS = ("SBER", "GAZP", "LKOH", "TATN")
 DEFAULT_LOTS = {"SBER": 10, "SBERP": 10, "GAZP": 10, "LKOH": 1, "TATN": 1, "YDEX": 1}
 
@@ -76,23 +78,31 @@ def export_simulation(path, strategies):
 
 
 def standalone_dashboard(output, report):
+    if not WEB_BUNDLE.is_file():
+        raise ValueError(BUILD_FRONTEND)
     html = (WEB / "index.html").read_text(encoding="utf-8")
     css = (WEB / "styles.css").read_text(encoding="utf-8")
-    charts = (WEB / "charts.js").read_text(encoding="utf-8").replace("</script", "<\\/script")
-    app = (WEB / "app.js").read_text(encoding="utf-8").replace("</script", "<\\/script")
+    app = WEB_BUNDLE.read_text(encoding="utf-8").replace("</script", "<\\/script")
     payload = report.read_text(encoding="utf-8").replace("<", "\\u003c")
     assets = {
-        '<link rel="stylesheet" href="/styles.css" />': f"<style>{css}</style>",
-        '<script src="/charts.js" defer></script>': f"<script>{charts}</script>",
-        '<script type="module" src="/app.js"></script>': (
-            f'<script id="embedded-report" type="application/json">{payload}</script>\n<script type="module">{app}</script>'
+        '<link rel="stylesheet" href="/styles.css">': f"<style>{css}</style>",
+        '<script src="/app.js" defer></script>': "",
+        '<div id="root"></div>': (
+            f'<div id="root"></div>\n<script id="embedded-report" type="application/json">'
+            f'{payload}</script>\n<script>{app}</script>'
         ),
     }
     for marker, content in assets.items():
         if marker not in html:
             raise RuntimeError(f"Не найден ресурс автономной панели: {marker}")
         html = html.replace(marker, content, 1)
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html, encoding="utf-8")
+
+
+def export_dashboard(args):
+    standalone_dashboard(args.output, args.report)
+    print(f"Панель: {args.output}")
 
 
 def run_backtest(args):
@@ -214,7 +224,10 @@ def run_backtest(args):
         "signals": latest_forecast(features),
     })
     export_simulation(output / "simulated-trades.csv", strategies)
-    standalone_dashboard(output / "dashboard.html", report_path)
+    if WEB_BUNDLE.is_file():
+        standalone_dashboard(output / "dashboard.html", report_path)
+    else:
+        print(BUILD_FRONTEND + " Готовый JSON можно открыть командой kontur dashboard после сборки.")
     label = "СИНТЕТИЧЕСКИЕ ДАННЫЕ" if demo else "ИСТОРИЧЕСКАЯ СИМУЛЯЦИЯ"
     print(f"{label} | {oos_start} — {oos_end} | {len(forecast.folds)} окон")
     for strategy in strategies.values():
@@ -330,7 +343,7 @@ class ReportHandler(BaseHTTPRequestHandler):
             return self.send_json(429, {"error": "Дождитесь ответа на предыдущий вопрос."})
         try:
             report = json.loads(self.report.read_text(encoding="utf-8"))
-            message = answer(report, data.get("agent"), data.get("question"))
+            message = answer(report, data.get("agent"), data.get("question"), data.get("period"))
         except ValueError as error:
             return self.send_json(400, {"error": str(error)})
         except RuntimeError as error:
@@ -346,8 +359,7 @@ class ReportHandler(BaseHTTPRequestHandler):
             "/": (WEB / "index.html", "text/html"),
             "/index.html": (WEB / "index.html", "text/html"),
             "/styles.css": (WEB / "styles.css", "text/css"),
-            "/charts.js": (WEB / "charts.js", "text/javascript"),
-            "/app.js": (WEB / "app.js", "text/javascript"),
+            "/app.js": (WEB_BUNDLE, "text/javascript"),
             "/results/report.json": (self.report, "application/json"),
             "/results/simulated-trades.csv": (self.report.with_name("simulated-trades.csv"), "text/csv"),
         }
@@ -368,8 +380,10 @@ class ReportHandler(BaseHTTPRequestHandler):
 
 def serve(args):
     from .mishka import enabled
+    if not WEB_BUNDLE.is_file():
+        raise ValueError(BUILD_FRONTEND)
     if args.mishka and (args.host != "127.0.0.1" or not enabled()):
-        raise ValueError("Для Мишки нужны локальный адрес 127.0.0.1, OPENROUTER_MODEL и OPENROUTER_API_KEY.")
+        raise ValueError("Для Мишки нужны локальный адрес 127.0.0.1 и OPENROUTER_API_KEY.")
     handler = partial(ReportHandler, report=args.report.resolve(), mishka=args.mishka)
     with ThreadingHTTPServer((args.host, args.port), handler) as server:
         print(f"Контур: http://{args.host}:{server.server_port}", flush=True)
@@ -424,6 +438,10 @@ def parser():
     collect.add_argument("--config", type=Path, required=True)
     collect.add_argument("--output", type=Path, default=Path("data/events.csv"))
     collect.set_defaults(action=collect_news)
+    dashboard = commands.add_parser("dashboard", help="Собрать автономную панель из готового report.json")
+    dashboard.add_argument("--report", type=Path, default=Path("results/report.json"))
+    dashboard.add_argument("--output", type=Path, default=Path("results/dashboard.html"))
+    dashboard.set_defaults(action=export_dashboard)
     server = commands.add_parser("serve", help="Открыть локальную панель результатов")
     server.add_argument("--report", type=Path, default=Path("results/report.json"))
     server.add_argument("--mishka", action="store_true", help="Включить Мишку через OpenRouter на локальном сервере")

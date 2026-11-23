@@ -1,4 +1,4 @@
-(() => {
+export const KonturChart = (() => {
   "use strict";
 
   const DAY = 86400000;
@@ -505,5 +505,5 @@
     }
   }
 
-  window.KonturChart = KonturChart;
+  return KonturChart;
 })();

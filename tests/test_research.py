@@ -70,6 +70,21 @@ class ResearchTest(unittest.TestCase):
         self.assertEqual([row["symbol"] for row in result["gainers"]], ["UP"])
         self.assertEqual([row["symbol"] for row in result["losers"]], ["DOWN"])
 
+    def test_explanation_uses_selected_multiday_window_without_trades(self):
+        from kontur.mishka import report_context
+
+        latest = {"start": "2026-09-08", "end": "2026-11-20", "drawdown_pct": .79, "trades": ["private"]}
+        history = {"months": 120, "available": True, "start": "2016-11-21", "end": "2026-11-20",
+                   "drawdown_pct": 5.15, "trades": ["private"]}
+        report = {"meta": {"dataset": "moex"}, "strategies": {},
+                  "long_study": {"strategies": {"rotation": {"horizons": [history], "fresh": latest}}}}
+        context = report_context(report, "rotation", "120")
+        self.assertEqual(context["metrics"]["drawdown_pct"], 5.15)
+        self.assertNotIn("trades", context["metrics"])
+        self.assertEqual(report_context(report, "rotation", "recent")["period"][0], "2026-09-08")
+        with self.assertRaises(ValueError):
+            report_context(report, "rotation", "24")
+
     @patch.dict("os.environ", {"OPENROUTER_MODEL": "test/model", "OPENROUTER_API_KEY": "fixture-key"})
     def test_mishka_sends_only_aggregate_context(self):
         response = io.BytesIO(b'{"choices":[{"message":{"content":"ok"}}]}')
