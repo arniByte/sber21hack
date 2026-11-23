@@ -2,10 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { KonturChart } from "./charts.js";
 import OrbScene from "./OrbScene.jsx";
+import OrbDock from "./OrbDock.jsx";
 import { auditOverlay, date, dates, download, exportTrades, factor, finite, list, num, object,
   pct, rub, sources, tone, validate, workbench } from "./report.js";
 
-const tabs = [["overview", "Обзор"], ["market", "Рынок"], ["account", "Счёт"], ["analysis", "Мишка"]];
+const tabs = [["overview", "Обзор"], ["market", "Рынок"], ["account", "Счёт"], ["analysis", "Ассистент"]];
 const exits = { stop: "Стоп", take_profit: "Цель", close: "Закрытие", gap: "Гэп", rotation: "Ротация" };
 const signals = [ ["equity", "Капитал"], ["drawdown", "Просадка"], ["outcomes", "По сделкам"] ];
 const topics = ["Сравни стратегии", "Что с риском?", "Откуда данные?"];
@@ -80,6 +81,41 @@ function Trades({ trades, day, clear, strategy }) {
   </>;
 }
 
+
+function Attribution({ report }) {
+  const { gross_pnl, commission, slippage, win_pct, expectancy, exits: byExit } = report;
+  return <Detail title="Из чего сложился результат">
+    <Metrics values={[
+      ["До издержек", rub(gross_pnl, true), tone(gross_pnl)],
+      ["Комиссия", rub(commission)], ["Проскальзывание", rub(slippage)],
+      ["Прибыльных сделок", pct(win_pct)], ["Средняя сделка", rub(expectancy, true), tone(expectancy)],
+    ]} />
+    {Object.keys(byExit).length > 0 && <table className="report-table">
+      <thead><tr><th>Причина выхода</th><th>Сделки</th><th>После издержек</th></tr></thead>
+      <tbody>{Object.entries(byExit).map(([key, item]) => <tr key={key}>
+        <th scope="row">{exits[key] || key}</th><td>{num(item.trades)}</td>
+        <td className={tone(item.net_pnl)}>{rub(item.net_pnl, true)}</td>
+      </tr>)}</tbody>
+    </table>}
+  </Detail>;
+}
+
+function GoalHistory({ goals }) {
+  const rows = [
+    ["Сессия", goals.daily, [2, 3]],
+    ["Месяц", goals.monthly, [15, 20]],
+    ["Год", goals.annual, [100]],
+  ];
+  return <Detail title="Цели и результат на истории">
+    <table className="report-table"><thead><tr><th>Период</th><th>Лучший</th><th>Достигли цели</th></tr></thead>
+      <tbody>{rows.flatMap(([label, stats, thresholds]) => stats.samples ? thresholds.map((level) => <tr key={label + level}>
+        <th scope="row">{label} · {level}%</th><td>{pct(stats.best_pct, true)}</td>
+        <td>{num(stats.hits[level])} / {num(stats.samples)}</td>
+      </tr>) : [])}</tbody></table>
+    <p className="muted">Месячные и годовые запуски стартуют с 35 000 ₽. Дни считаются по изменению капитала в непрерывном десятилетнем прогоне.</p>
+  </Detail>;
+}
+
 function Overview({ report, profiles, strategy, period, setStrategy, setPeriod }) {
   const [metric, setMetric] = useState("equity");
   const [day, setDay] = useState("");
@@ -152,6 +188,8 @@ function Overview({ report, profiles, strategy, period, setStrategy, setPeriod }
       <Detail title="Риск и издержки">
         <Metrics values={riskPart.filter(([, value]) => value !== "—")} />
       </Detail>
+      {period.attribution && <Attribution report={period.attribution} />}
+      {strategy.targets && <GoalHistory goals={strategy.targets} />}
       {strategy.annual?.length > 0 && <Detail title="Результаты по годам" hint={strategy.annualSummary?.profitable + " / " + strategy.annualSummary?.count + " в плюсе"}>
         <Metrics values={[
           ["Скользящие окна в плюсе", num(strategy.rolling?.profitable) + " / " + num(strategy.rolling?.count)],
@@ -173,7 +211,7 @@ function Overview({ report, profiles, strategy, period, setStrategy, setPeriod }
             <a href={event.url} target="_blank" rel="noreferrer">{event.title}</a> : event?.title}
             {" "}<small>{date(event?.published_at, true)}</small></li>)}</ul>}
         {strategy.group === "Внутридневные" && object(report.preset?.risk) && <button className="secondary" onClick={() =>
-          download("kontur-" + strategy.key + ".json", JSON.stringify({ ...report.preset, agent: strategy.key }, null, 2), "application/json")}>Скачать пресет</button>}
+          download("cyclone-" + strategy.key + ".json", JSON.stringify({ ...report.preset, agent: strategy.key }, null, 2), "application/json")}>Скачать пресет</button>}
       </Detail>
     </section>
   </>;
@@ -259,7 +297,7 @@ function Analysis({ report, strategy, period, profiles, live }) {
     setAnswer("");
     request.current = new AbortController();
     try {
-      const response = await fetch("/api/mishka", { method: "POST", headers: { "Content-Type": "application/json" },
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: query, agent: strategy.key, period: period.id }), signal: request.current.signal });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Ответ недоступен.");
@@ -272,7 +310,7 @@ function Analysis({ report, strategy, period, profiles, live }) {
     } finally { setBusy(false); }
   }
   return <section className="surface secondary-page ask-page">
-    <h1>Мишка</h1><p className="muted">{strategy.label} · {dates(period.start, period.end)} · {live ? "OpenRouter" : "Офлайн-разбор"}</p>
+    <h1>Циклон</h1><p className="muted">{strategy.label} · {dates(period.start, period.end)} · {live ? "OpenRouter" : "Офлайн-разбор"}</p>
     <form className="ask-form" onSubmit={(e) => { e.preventDefault(); ask(question); }}>
       <input aria-label="Вопрос по отчёту" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Что разобрать в отчёте?" maxLength={500} />
       <button aria-label="Отправить вопрос" type="submit" disabled={busy || !question.trim()}>↑</button>
@@ -292,6 +330,7 @@ function App() {
   const [notice, setNotice] = useState("");
   const [imported, setImported] = useState(false);
   const importedRef = useRef(false);
+  const main = useRef(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -306,11 +345,11 @@ function App() {
           });
         if (!importedRef.current) setReport(validate(data));
       } catch (error) {
-        if (!importedRef.current && error.name !== "AbortError") setNotice("Откройте готовый отчёт Контура.");
+        if (!importedRef.current && error.name !== "AbortError") setNotice("Откройте готовый отчёт Циклона.");
       }
     };
     sync();
-    if (!embedded) fetch("/api/capabilities", { signal }).then((r) => r.json()).then((data) => setLive(data.mishka === true)).catch(() => {});
+    if (!embedded) fetch("/api/capabilities", { signal }).then((r) => r.json()).then((data) => setLive((data.assistant ?? data.mishka) === true)).catch(() => {});
     return () => controller.abort();
   }, []);
 
@@ -327,17 +366,23 @@ function App() {
     } catch (error) { setNotice(error.message); }
   };
 
+  const navigate = (next) => {
+    setView(next);
+    requestAnimationFrame(() => {
+      main.current.focus({preventScroll: true});
+      window.scrollTo(0, 0);
+    });
+  };
+
   return <>
     <a className="skip sr-only" href="#main">К содержимому</a>
     <header className="topbar">
       <div className="top-inner">
-        <button className="brand" onClick={() => setView("overview")} aria-label="Контур · Обзор"><i aria-hidden="true" />Контур</button>
-        <nav aria-label="Разделы">{tabs.map(([key, name]) =>
-          <button key={key} aria-current={view === key ? "page" : undefined} onClick={() => setView(key)}>{name}</button>)}</nav>
+        <button className="brand" onClick={() => navigate("overview")} aria-label="Циклон · Обзор"><i aria-hidden="true" />Циклон</button>
         <FileButton onData={load}>Открыть отчёт</FileButton>
       </div>
     </header>
-    <main id="main" className="page">
+    <main id="main" ref={main} tabIndex={-1} className="page">
       {notice && <p className="error" role="alert">{notice}</p>}
       {!report && !notice && <p className="muted">Открываем отчёт…</p>}
       {report && <div key={view} className="view">
@@ -348,6 +393,7 @@ function App() {
         {view === "analysis" && <Analysis report={report} strategy={strategy} period={period} profiles={profiles} live={live && !imported} />}
       </div>}
     </main>
+    <OrbDock items={tabs} active={view} onNavigate={navigate} disabled={!report} />
   </>;
 }
 

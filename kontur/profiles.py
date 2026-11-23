@@ -35,7 +35,7 @@ def configuration(name, path, lots, overrides=None):
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if (not isinstance(data, dict) or set(data) != {"version", "profile", "agent", "risk", "lots", "objective"}
                 or type(data["version"]) is not int or data["version"] != 1):
-            raise ValueError("Нужен пресет Контур версии 1.")
+            raise ValueError("Нужен пресет Циклон версии 1.")
         objective = data["objective"]
         if objective not in ("exit", "close"):
             raise ValueError("Неизвестная цель модели.")

@@ -1,8 +1,10 @@
 """Compare independent calendar periods and alternative position sizing."""
 
+from collections import defaultdict
 from dataclasses import asdict, replace
 from statistics import median
 
+from .contest import CAPITAL
 from .horizons import months_before
 from .swing import PROFILES, STRATEGIES, forecasts, replay, shared_calendar
 
@@ -15,6 +17,39 @@ def summarize(windows):
             "median_pct": median(returns) if returns else None,
             "max_drawdown_pct": max((w["drawdown_pct"] for w in windows), default=None),
             "windows_30_trades": len(qualified)}
+
+
+def trade_attribution(trades):
+    total = len(trades)
+    by_exit = defaultdict(lambda: {"trades": 0, "net_pnl": 0.0})
+    for trade in trades:
+        group = by_exit[trade["reason"]]
+        group["trades"] += 1
+        group["net_pnl"] += trade["net_pnl"]
+    return {
+        "gross_pnl": sum(t["gross_pnl"] for t in trades),
+        "commission": sum(t["commission"] for t in trades),
+        "slippage": sum(t["slippage"] for t in trades),
+        "win_pct": 100 * sum(t["net_pnl"] > 0 for t in trades) / total if total else None,
+        "expectancy": sum(t["net_pnl"] for t in trades) / total if total else None,
+        "exits": dict(by_exit),
+    }
+
+
+def target_summary(values, targets):
+    return {
+        "samples": len(values), "best_pct": max(values, default=None),
+        "worst_pct": min(values, default=None), "median_pct": median(values) if values else None,
+        "hits": {str(target): sum(value + 1e-10 >= target for value in values) for target in targets},
+    }
+
+
+def session_returns(equity, capital=CAPITAL):
+    values = []
+    for _, value, _ in equity:
+        values.append(100 * (value / capital - 1))
+        capital = value
+    return values
 
 
 def decade_study(bars, lots, holdout_after=None):
@@ -41,7 +76,9 @@ def decade_study(bars, lots, holdout_after=None):
         if details:
             fixed = replay(days_in_window, book, selected, lots, reinvest=False, **params)
             stressed = replay(days_in_window, book, selected, lots, cost_bps=10, **params)
-            stats.update(equity=result["equity"], trades=result["trades"], fixed_size_pct=fixed["metrics"]["return_pct"],
+            stats.update(equity=result["equity"], trades=result["trades"],
+                         attribution=trade_attribution(result["trades"]),
+                         fixed_size_pct=fixed["metrics"]["return_pct"],
                          stress_pct=stressed["metrics"]["return_pct"])
             if strategy in ("rotation", "pullback"):
                 reference = PROFILES["trend"]
@@ -57,7 +94,7 @@ def decade_study(bars, lots, holdout_after=None):
     trade_log = []
     for key, label in STRATEGIES.items():
         periods = []
-        for months in (6, 12, 24, 60, 120):
+        for months in (1, 6, 12, 24, 60, 120):
             result = window(months, 0, key, details=True)
             periods.append({"months": months, "available": bool(result), **(result[0] if result else {})})
             if result and months == 120:
@@ -66,9 +103,15 @@ def decade_study(bars, lots, holdout_after=None):
                   if (result := window(12, offset, key))]
         rolling = [result[0] for offset in range(0, 109, 3)
                    if (result := window(12, offset, key))]
+        monthly = [result[0]["return_pct"] for offset in range(120)
+                   if (result := window(1, offset, key))]
         report["strategies"][key] = {"label": label, "rules": asdict(PROFILES[key]), "horizons": periods, "annual": annual,
                                     "annual_summary": summarize(annual), "rolling": rolling,
-                                    "rolling_summary": summarize(rolling)}
+                                    "rolling_summary": summarize(rolling), "targets": {
+                                        "monthly": target_summary(monthly, (15, 20)),
+                                        "annual": target_summary([w["return_pct"] for w in annual], (100,)),
+                                        "daily": target_summary(session_returns(periods[-1].get("equity", [])), (2, 3)),
+                                    }}
         if holdout_after:
             fresh, trades = window(None, 0, key, details=True, after=holdout_after)
             report["strategies"][key]["fresh"] = fresh

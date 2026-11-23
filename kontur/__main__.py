@@ -210,7 +210,7 @@ def run_backtest(args):
         write_json(output / "decade-study.json", study)
         with (output / "study-trades.csv").open("w", encoding="utf-8-sig", newline="") as stream:
             fields = ("strategy", "period", "symbol", "entry_day", "exit_day", "quantity", "entry_price",
-                      "exit_price", "net_pnl", "reason")
+                      "exit_price", "gross_pnl", "commission", "slippage", "net_pnl", "reason")
             writer = csv.DictWriter(stream, fieldnames=fields)
             writer.writeheader()
             writer.writerows(episodes)
@@ -322,8 +322,8 @@ class ReportHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         from .mishka import SLOTS, answer
 
-        if self.path != "/api/mishka" or not self.mishka:
-            return self.send_json(404, {"error": "Мишка отключён."})
+        if self.path not in ("/api/assistant", "/api/mishka") or not self.mishka:
+            return self.send_json(404, {"error": "Ассистент отключён."})
         local = {f"{name}:{self.server.server_port}" for name in ("127.0.0.1", "localhost")}
         host = self.headers.get("Host")
         if host not in local or self.headers.get("Origin") != "http://" + host:
@@ -354,7 +354,7 @@ class ReportHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/capabilities":
-            return self.send_json(200, {"mishka": self.mishka})
+            return self.send_json(200, {"assistant": self.mishka, "mishka": self.mishka})
         assets = {
             "/": (WEB / "index.html", "text/html"),
             "/index.html": (WEB / "index.html", "text/html"),
@@ -383,10 +383,10 @@ def serve(args):
     if not WEB_BUNDLE.is_file():
         raise ValueError(BUILD_FRONTEND)
     if args.mishka and (args.host != "127.0.0.1" or not enabled()):
-        raise ValueError("Для Мишки нужны локальный адрес 127.0.0.1 и OPENROUTER_API_KEY.")
+        raise ValueError("Для ассистента нужны локальный адрес 127.0.0.1 и OPENROUTER_API_KEY.")
     handler = partial(ReportHandler, report=args.report.resolve(), mishka=args.mishka)
     with ThreadingHTTPServer((args.host, args.port), handler) as server:
-        print(f"Контур: http://{args.host}:{server.server_port}", flush=True)
+        print(f"Циклон: http://{args.host}:{server.server_port}", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
@@ -444,7 +444,8 @@ def parser():
     dashboard.set_defaults(action=export_dashboard)
     server = commands.add_parser("serve", help="Открыть локальную панель результатов")
     server.add_argument("--report", type=Path, default=Path("results/report.json"))
-    server.add_argument("--mishka", action="store_true", help="Включить Мишку через OpenRouter на локальном сервере")
+    server.add_argument("--assistant", "--mishka", dest="mishka", action="store_true",
+                        help="Включить ассистента Циклона через OpenRouter на локальном сервере")
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=8080)
     server.set_defaults(action=serve)
@@ -464,7 +465,7 @@ def main():
     try:
         args.action(args)
     except (ValueError, OSError, RuntimeError) as error:
-        print(f"Контур: {error}", file=sys.stderr)
+        print(f"Циклон: {error}", file=sys.stderr)
         return 1
     return 0
 

@@ -17,10 +17,10 @@ export const tone = (n) => n > 0 ? "positive" : n < 0 ? "negative" : "";
 export const factor = (m) => m.no_losses ? "∞" : num(m.profit_factor);
 const plural = new Intl.PluralRules("ru-RU");
 const sessions = (n) => num(n) + " " + ({ one: "сессия", few: "сессии", many: "сессий" }[plural.select(n)] || "сессий");
-export const periodLabels = { 6: "6 мес.", 12: "1 год", 24: "2 года", 60: "5 лет", 120: "10 лет", base: "Основной прогон" };
+export const periodLabels = { 1: "1 мес.", 6: "6 мес.", 12: "1 год", 24: "2 года", 60: "5 лет", 120: "10 лет", base: "Основной прогон" };
 export const sources = { synthetic: "Синтетические данные", moex: "Мосбиржа · ISS", archive: "Архив Мосбиржи", csv: "Импорт CSV" };
 const studyColors = {
-  trend: ["Тренд · 5 сессий", "#784cbd"], ridge: ["Ridge · 5 сессий", "#b76172"],
+  trend: ["Тренд · 5 сессий", "#784cbd"], breadth: ["Тренд с рыночным фильтром", "#248477"], extended: ["Тренд с продлением", "#405cb3"], ridge: ["Ridge · 5 сессий", "#b76172"],
   rotation: ["Недельная ротация", "#4a63ba"], pullback: ["Покупка отката", "#956344"],
 };
 const intradayColors = {
@@ -44,7 +44,7 @@ export function workbench(report) {
       equity: list(w.equity).map(([date, equity, drawdown_pct]) => ({ date, equity, drawdown_pct })),
     }));
     return windows.length ? [{ key, label, color, windows, annual: profile.annual, rolling: profile.rolling_summary,
-      annualSummary: profile.annual_summary, group: "Многодневные" }] : [];
+      annualSummary: profile.annual_summary, targets: profile.targets, group: "Многодневные" }] : [];
   });
   const daily = Object.entries(intradayColors).flatMap(([key, [label, color]]) => {
     const profile = report.strategies[key];
@@ -64,7 +64,7 @@ export function workbench(report) {
 
 export function validate(report) {
   if (report?.schema_version !== 1 || !object(report.strategies) || !object(report.meta) || !workbench(report).length) {
-    throw new Error("Выберите файл report.json из Контура.");
+    throw new Error("Выберите файл report.json из Циклона.");
   }
   return report;
 }
@@ -95,13 +95,13 @@ export function download(name, content, type) {
 }
 
 export function exportTrades(items, key) {
-  const columns = ["symbol", "entry", "exit", "net_pnl", "reason"];
+  const columns = ["symbol", "entry", "exit", "gross_pnl", "commission", "slippage", "net_pnl", "reason"];
   const cell = (value) => {
     let text = String(value ?? "");
     if (typeof value === "string" && /^[\s]*[=+@-]/.test(text)) text = "'" + text;
     return '"' + text.replaceAll('"', '""') + '"';
   };
   const values = items.map((t) => [t.symbol || t.ticker, t.entry_day || t.entry_at,
-    t.exit_day || t.exit_at, t.net_pnl ?? t.pnl, t.reason]);
-  download("kontur-" + key + "-trades.csv", "\ufeff" + [columns.join(","), ...values.map((row) => row.map(cell).join(","))].join("\r\n"), "text/csv;charset=utf-8");
+    t.exit_day || t.exit_at, t.gross_pnl, t.commission, t.slippage, t.net_pnl ?? t.pnl, t.reason]);
+  download("cyclone-" + key + "-trades.csv", "\ufeff" + [columns.join(","), ...values.map((row) => row.map(cell).join(","))].join("\r\n"), "text/csv;charset=utf-8");
 }

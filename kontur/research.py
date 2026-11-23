@@ -59,7 +59,7 @@ def dossier(study):
     )}
     context["limitations"] = LIMITATIONS
     context["strategies"] = {}
-    for name in ("trend", "ridge", "rotation", "pullback"):
+    for name in ("trend", "breadth", "extended", "ridge", "rotation", "pullback"):
         if name not in study["strategies"]:
             continue
         strategy = study["strategies"][name]
@@ -72,7 +72,8 @@ def dossier(study):
             context["strategies"][name]["fresh"] = period_metrics(strategy["fresh"])
         if isinstance(strategy.get("rules"), dict):
             context["strategies"][name]["rules"] = {
-                key: strategy["rules"][key] for key in ("sessions", "stop", "position", "risk")
+                key: strategy["rules"][key] for key in ("sessions", "stop", "position", "risk", "extension")
+                if key in strategy["rules"]
             }
     return context
 

@@ -6,6 +6,7 @@ from unittest.mock import patch
 from kontur.data import Bar
 from kontur.research import dossier, messages, review
 from kontur.series import extend_with_iss
+from kontur.study import session_returns, target_summary, trade_attribution
 from kontur.swing import PROFILES, Signal, forecasts, replay, shared_calendar
 
 
@@ -47,6 +48,27 @@ class DecadeTest(unittest.TestCase):
         self.assertTrue(all(fold["train_label_end"] < fold["first_signal"] for fold in folds))
         self.assertEqual(list(plays["ridge"]), list(plays["trend"]))
         self.assertEqual(list(plays["ridge"])[-1], days[-1])
+
+    def test_extension_uses_previous_close_and_preserves_cost_accounting(self):
+        start = date(2024, 4, 1)
+        days = [start + timedelta(days=i) for i in range(10)]
+        bars = [Bar("SBER", day, 100 + i, 102 + i, 99.5 + i, 101 + i, 1000)
+                for i, day in enumerate(days)]
+        days, _, book = shared_calendar(bars)
+        args = (days, book, {days[0]: [Signal("SBER", 1)]}, {"SBER": 1})
+        baseline = replay(*args)
+        extended = replay(*args, rules=PROFILES["extended"])
+        self.assertEqual(baseline["trades"][0]["exit_day"], days[4])
+        self.assertEqual(extended["trades"][0]["exit_day"], days[9])
+        attribution = trade_attribution(extended["trades"])
+        self.assertAlmostEqual(extended["metrics"]["net_pnl"],
+                               attribution["gross_pnl"] - attribution["commission"] - attribution["slippage"])
+
+    def test_daily_targets_use_capital_and_include_flat_sessions(self):
+        values = session_returns([(None, 100, 0), (None, 102, 0), (None, 102, 0)], capital=100)
+        summary = target_summary(values, (2, 3))
+        self.assertEqual(summary["samples"], 3)
+        self.assertEqual(summary["hits"], {"2": 1, "3": 0})
 
     def test_rotation_trails_prior_close_and_exits_before_later_low(self):
         monday = date(2024, 4, 1)

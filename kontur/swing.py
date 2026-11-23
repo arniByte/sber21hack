@@ -22,6 +22,8 @@ FEATURES = ("return_5", "return_20", "return_60", "distance_sma_60", "volatility
             "range_20", "breadth_60")
 STRATEGIES = {
     "trend": "Тренд · 5 сессий",
+    "breadth": "Тренд с рыночным фильтром",
+    "extended": "Тренд с продлением",
     "ridge": "Ridge · 5 сессий",
     "rotation": "Недельная ротация",
     "pullback": "Покупка отката",
@@ -34,10 +36,13 @@ class Rules:
     stop: float = STOP
     position: float = .15
     risk: float = .0045
+    extension: int = 0
 
 
 PROFILES = {
     "trend": Rules(),
+    "breadth": Rules(),
+    "extended": Rules(extension=5),
     "ridge": Rules(),
     "rotation": Rules(None, .05, .30, .012),
     "pullback": Rules(7, .04, .30, .012),
@@ -126,7 +131,7 @@ def forecasts(days, symbols, book):
         raise ValueError("Недостаточно истории для обучения и отложенного прогноза.")
     fit_features = np.array(x)
     labels = np.array(y)
-    results = {"trend": {}, "ridge": {}}
+    results = {"trend": {}, "breadth": {}, "ridge": {}}
     folds = []
     eligible = np.array([(right-left).days <= 7 for left, right in zip(days[60:-1], days[61:])])
     with threadpool_limits(limits=1):
@@ -149,8 +154,10 @@ def forecasts(days, symbols, book):
                               if eligible[row] and x[row][k, 1] > 0 and x[row][k, 3] > 0]
                 results["trend"][day] = [Signal(symbols[k], float(x[row][k, 1] / x[row][k, 4]))
                                          for k in candidates]
+                results["breadth"][day] = results["trend"][day] if x[row][0, -1] >= .75 else []
                 results["ridge"][day] = [Signal(symbols[k], float(values[row - start][k]))
                                          for k in candidates]
+    results["extended"] = results["trend"]
     results.update(rule_signals(days, symbols, prices, 60 + TRAIN_SESSIONS + HOLD))
     return results, folds
 
@@ -174,6 +181,7 @@ def replay(days, book, signals, lots, *, forecast_gate=False, reinvest=True, cos
     cash = equity = peak = capital
     position = None
     trailing_close = 0.0
+    extended = False
     halt = None
     curve, trades = [], []
     exposed = 0
@@ -194,6 +202,7 @@ def replay(days, book, signals, lots, *, forecast_gate=False, reinvest=True, cos
                 if quantity:
                     position = Position(signal.ticker, quantity, opening, unit_cost * quantity, day, index)
                     trailing_close = opening
+                    extended = False
                     cash -= position.cost
                     break
         heat = equity = cash
@@ -201,9 +210,15 @@ def replay(days, book, signals, lots, *, forecast_gate=False, reinvest=True, cos
             exposed += 1
             bar = book[day][position.ticker]
             rotates = rules.sessions is None
-            stop_base = trailing_close if rotates else position.opening
+            age = index - position.entry_index + 1
+            if rules.extension and age == rules.sessions:
+                previous_close = book[days[index - 1]][position.ticker].close
+                extended = previous_close >= position.opening * (1 + rules.stop)
+            stop_base = trailing_close if rotates or extended else position.opening
             stop = stop_base * (1 - rules.stop)
-            limit = not rotates and index - position.entry_index + 1 >= rules.sessions
+            if extended:
+                stop = max(position.opening, stop)
+            limit = not rotates and age >= rules.sessions + (rules.extension if extended else 0)
             dropped = (rotates and day in signals and position.entry_day != day
                        and position.ticker not in {s.ticker for s in candidates[:2]})
             if dropped and bar.open > stop:
@@ -220,6 +235,9 @@ def replay(days, book, signals, lots, *, forecast_gate=False, reinvest=True, cos
                 proceeds = reference * sell * position.quantity
                 trades.append({"symbol": position.ticker, "entry_day": position.entry_day, "exit_day": day,
                                "quantity": position.quantity, "net_pnl": proceeds - position.cost,
+                               "gross_pnl": position.quantity * (reference - position.opening),
+                               "commission": position.quantity * cost * (position.opening * (1 + cost) + reference * (1 - cost)),
+                               "slippage": position.quantity * cost * (position.opening + reference),
                                "entry_price": position.opening * (1 + cost),
                                "exit_price": reference * (1 - cost), "reason": reason})
                 cash += proceeds

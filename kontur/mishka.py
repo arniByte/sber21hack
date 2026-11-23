@@ -17,18 +17,37 @@ def enabled():
     return bool(os.environ.get("OPENROUTER_API_KEY"))
 
 
+def study_window(profile, period):
+    if period == "recent":
+        return profile.get("fresh")
+    return next((w for w in profile["horizons"] if w["available"] and str(w["months"]) == period), None)
+
+
 def report_context(report, agent, period):
     if isinstance(agent, str) and isinstance(period, (str, type(None))):
-        study = report.get("long_study", {}).get("strategies", {}).get(agent)
+        research = report.get("long_study", {}).get("strategies", {})
+        study = research.get(agent)
         if study:
-            picked = study.get("fresh") if period == "recent" else next(
-                (w for w in study["horizons"] if w["available"] and str(w["months"]) == period), None)
+            picked = study_window(study, period)
             if picked:
-                return {"period": [picked["start"], picked["end"]], "dataset": report["meta"]["dataset"],
-                        "strategy": agent, "metrics": {name: picked.get(name) for name in (
-                            "return_pct", "net_pnl", "trade_count", "drawdown_pct", "profit_factor",
-                            "stress_pct", "matched_risk_pct", "concentration_pct"
-                        )}}
+                context = {"period": [picked["start"], picked["end"]], "dataset": report["meta"]["dataset"],
+                           "strategy": agent, "metrics": {name: picked.get(name) for name in (
+                               "return_pct", "net_pnl", "trade_count", "drawdown_pct", "profit_factor",
+                               "stress_pct", "matched_risk_pct", "concentration_pct"
+                           )}}
+                if picked.get("attribution"):
+                    context["attribution"] = picked["attribution"]
+                if study.get("targets"):
+                    context["history_from_10y"] = study["targets"]
+                context["same_window_comparison"] = {
+                    profile.get("label", key): {metric: row.get(metric) for metric in (
+                        "return_pct", "drawdown_pct", "trade_count"
+                    )}
+                    for key, profile in research.items()
+                    if (row := study_window(profile, period))
+                    and (row["start"], row["end"]) == (picked["start"], picked["end"])
+                }
+                return context
         daily = report["strategies"].get(agent)
         if daily:
             meta = report["meta"]
@@ -51,8 +70,8 @@ def answer(report, agent, question, period=None):
     context = report_context(report, agent, period)
     return complete([
         {"role": "system", "content":
-         "Ты Мишка, аналитик исторических симуляций Контур. Отвечай коротко по-русски без разметки. "
-         "Числа бери из переданной сводки. Различай симуляцию и реальный счёт. "
+         "Ты Циклон, ассистент по историческим симуляциям торговых стратегий. Отвечай коротко по-русски без разметки. "
+         "Числа бери из переданной сводки. Исторические цели по 10 годам и выбранный период указывай отдельно. Различай симуляцию и реальный счёт. "
          "Если данных недостаточно, укажи каких. Не обещай прибыль."},
         {"role": "user", "content": json.dumps({"summary": context, "question": question}, ensure_ascii=False)},
     ])
