@@ -12,7 +12,7 @@ npm run build
 python -m kontur checkpoint --download
 ```
 
-Откройте `results/checkpoint/dashboard.html`. Часовые свечи закреплены по SHA-256. В отчёте доступны весь архив, поздний отрезок и результаты по направлениям.
+Откройте `results/checkpoint/dashboard.html`. Часовые свечи закреплены по SHA-256. В отчёте доступны весь архив, поздний отрезок и результаты по направлениям. Для офлайн-показа лимитной версии запустите `python -m kontur checkpoint --jury --download --output results/jury` и откройте `results/jury/pitch.html`. [Текст защиты версии 2.0](docs/checkpoint-v2-pitch.md)
 
 ## Открыть рыночный отчёт
 

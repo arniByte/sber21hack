@@ -212,3 +212,26 @@ button, a, input, select, summary, canvas { -webkit-tap-highlight-color: transpa
 }
 .dock-panel button[aria-current], .dock-panel button:hover { background: #fff; color: var(--text); }
 @media (max-width: 365px) { .dock-panel button { padding-inline: 10px; font-size: 13px; } }
+
+.jury-page { padding-bottom: 66px; }
+.jury-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
+.jury-header a { color: var(--text); text-decoration: none; }
+.jury-header nav { display: flex; flex-wrap: wrap; gap: 4px; }
+.jury-header nav a { border-radius: 14px; color: var(--muted); padding: 8px 10px; font-size: 13px; font-weight: 600; }
+.jury-header nav a:hover { background: #edece9; }
+.jury-page .hero h1 { max-width: none; }
+.jury-metrics { padding: 22px 2px; }
+.jury-block { margin-top: 18px; scroll-margin-top: 14px; }
+.jury-block .section-head { align-items: center; }
+.jury-candles { display: block; width: 100%; height: clamp(224px, 33vw, 340px); margin-top: 16px; }
+.jury-step { background: #f2f0f6; border-radius: 15px; padding: 13px 16px; min-height: 80px; }
+.jury-step p { color: var(--muted); margin-top: 4px; line-height: 1.5; }
+.jury-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.jury-note { margin-top: 14px; }
+.jury-quote { margin: 14px 0 6px; border-left: 3px solid #a48acb; padding: 8px 14px; color: #444151; line-height: 1.6; }
+@media (max-width: 510px) {
+  .jury-page .hero h1 { font-size: clamp(33px, 9vw, 47px); }
+  .jury-header nav a { padding: 7px 5px; }
+  .jury-metrics dt { line-height: 1.2; }
+  .jury-block .report-table th, .jury-block .report-table td { font-size: 12px; }
+}

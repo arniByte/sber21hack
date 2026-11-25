@@ -24,6 +24,8 @@ const studyColors = {
   rotation: ["Недельная ротация", "#4a63ba"], pullback: ["Покупка отката", "#956344"],
 };
 const intradayColors = {
+  checkpoint_limit: ["Лимитный ретест · весь архив", "#405cb3"],
+  checkpoint_limit_holdout: ["Лимитный ретест · июль — сентябрь", "#248477"],
   checkpoint_retest: ["Ретест · весь архив", "#405cb3"],
   checkpoint_retest_holdout: ["Ретест · июль — сентябрь", "#248477"],
   checkpoint: ["Возврат · весь архив", "#956344"],

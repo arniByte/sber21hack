@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { KonturChart } from "./charts.js";
 import OrbScene from "./OrbScene.jsx";
 import OrbDock from "./OrbDock.jsx";
+import CheckpointPitch from "./CheckpointPitch.jsx";
 import { auditOverlay, date, dates, download, exportTrades, factor, finite, list, num, object,
   pct, rub, sources, tone, validate, workbench } from "./report.js";
 
@@ -385,6 +386,8 @@ function App() {
       window.scrollTo(0, 0);
     });
   };
+
+  if (report?.checkpoint?.presentation) return <CheckpointPitch report={report} />;
 
   return <>
     <a className="skip sr-only" href="#main">К содержимому</a>

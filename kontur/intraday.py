@@ -2,7 +2,7 @@
 
 import csv
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime
 from hashlib import sha256
 from math import floor, isfinite
@@ -48,6 +48,7 @@ class Setup:
     target: float
     loss: float
     ratio: float
+    limit: float | None = None
 
 
 def sessions(root, download=False):
@@ -103,18 +104,37 @@ def reversal(history, hour, cost):
     return bracket(side, previous, opening, cost, band.high if side == 1 else band.low)
 
 
-def retest(history, hour, cost):
+def confirmed_retest(history, hour):
     if hour < 13:
         return None
     band, breakout, test, opening = history[10], history[hour-2], history[hour-1], history[hour].open
     width = band.high - band.low
     if (breakout.close > band.high and test.low <= band.high < test.close
             and band.high <= opening <= band.high + width / 4):
-        return bracket(1, test, opening, cost)
+        return 1, test, band.high
     if (breakout.close < band.low and test.high >= band.low > test.close
             and band.low - width / 4 <= opening <= band.low):
-        return bracket(-1, test, opening, cost)
+        return -1, test, band.low
     return None
+
+
+def retest(history, hour, cost):
+    if evidence := confirmed_retest(history, hour):
+        side, test, _ = evidence
+        return bracket(side, test, history[hour].open, cost)
+    return None
+
+
+def limit_retest(history, hour, cost):
+    if evidence := confirmed_retest(history, hour):
+        side, test, limit = evidence
+        if setup := bracket(side, test, limit, cost):
+            return replace(setup, limit=limit)
+    return None
+
+
+def limit_filled(bar, setup):
+    return bar.low < setup.limit if setup.side == 1 else bar.high > setup.limit
 
 
 def bracket(side, evidence, opening, cost, boundary=None):
@@ -131,19 +151,19 @@ def bracket(side, evidence, opening, cost, boundary=None):
     return Setup(side, stop, target, loss, profit / loss) if profit >= loss * 1.25 else None
 
 
-def exit_at(bar, setup, cutoff=False):
+def exit_at(bar, setup, cutoff=False, fill_bar=False):
     side = setup.side
     if cutoff:
         return bar.open, "cutoff", bar.open
-    if side * (bar.open - setup.stop) <= 0:
+    if not fill_bar and side * (bar.open - setup.stop) <= 0:
         return bar.open, "gap", bar.open
-    if side * (bar.open - setup.target) >= 0:
+    if not fill_bar and side * (bar.open - setup.target) >= 0:
         return setup.target, "target", setup.target
     adverse = bar.low if side == 1 else bar.high
     favorable = bar.high if side == 1 else bar.low
     if side * (adverse - setup.stop) <= 0:
         return setup.stop, "stop", setup.stop
-    if side * (favorable - setup.target) >= 0:
+    if not fill_bar and side * (favorable - setup.target) >= 0:
         return setup.target, "target", adverse
     return None, None, adverse
 
@@ -152,7 +172,8 @@ def simulate(days, *, entry=reversal, cost_bps=5):
     cost = cost_bps / 10_000
     cash = peak = CAPITAL
     equity, trades = [], []
-    skipped_lot = 0
+    skipped_lot = orders = 0
+    first_cancelled = None
     for day, symbols in sorted(days.items()):
         daily_dd = 0.0
         trade = None
@@ -163,7 +184,8 @@ def simulate(days, *, entry=reversal, cost_bps=5):
                 setup = entry(history, hour, cost)
                 if setup:
                     lot = LOTS[symbol]
-                    price = fills(setup.side, opening, opening, cost)[0]
+                    reference = setup.limit if setup.limit is not None else opening
+                    price = fills(setup.side, reference, reference, cost)[0]
                     qty = floor(min(cash * DAILY_RISK / setup.loss, cash * NOTIONAL_CAP / price) / lot) * lot
                     if qty:
                         candidates.append((setup.ratio, symbol, setup, qty))
@@ -173,10 +195,17 @@ def simulate(days, *, entry=reversal, cost_bps=5):
                 continue
             _, symbol, setup, qty = min(candidates, key=lambda item: (-item[0], item[1]))
             history = symbols[symbol]
-            opening = history[hour].open
+            orders += 1
+            is_limit = setup.limit is not None
+            if is_limit and not limit_filled(history[hour], setup):
+                if first_cancelled is None:
+                    first_cancelled = {"day": day, "symbol": symbol, "hour": hour, "side": setup.side,
+                                       "limit": setup.limit, "stop": setup.stop, "target": setup.target}
+                continue
+            opening = setup.limit if is_limit else history[hour].open
             for end in range(hour, FLAT_AT + 1):
                 candle = history[end]
-                reference, reason, adverse = exit_at(candle, setup, end == FLAT_AT)
+                reference, reason, adverse = exit_at(candle, setup, end == FLAT_AT, is_limit and end == hour)
                 heat = cash + qty * fills(setup.side, opening, adverse, cost)[2]
                 daily_dd = max(daily_dd, 100 * (peak - heat) / peak)
                 if reference is None:
@@ -188,6 +217,7 @@ def simulate(days, *, entry=reversal, cost_bps=5):
                     "trade_day": day.isoformat(), "entry_at": f"{day}T{hour:02d}:00:00+03:00",
                     "exit_at": f"{day}T{end:02d}:00:00+03:00" if reason in ("gap", "cutoff") else None,
                     "exit_hour_msk": end, "reason": reason, "quantity": qty,
+                    "entry_window": "hour" if is_limit else "open", "limit": setup.limit,
                     "entry_price": entry_price, "exit_price": exit_price, "stop": setup.stop, "target": setup.target,
                     "gross_pnl": qty * setup.side * (reference - opening), "commission": qty * fee,
                     "slippage": qty * cost * (opening + reference),
@@ -209,7 +239,8 @@ def simulate(days, *, entry=reversal, cost_bps=5):
                    (p["drawdown_pct"] for p in equity), default=0), "profit_factor": gains / loss if loss else None,
                "no_losses": bool(gains and not loss), "expectancy": net / len(trades) if trades else None,
                "concentration_pct": 100 * max(t["pnl"] for t in trades) / net if net > 0 and trades else None}
-    return {"equity": equity, "metrics": metrics, "trades": trades, "skipped_too_expensive": skipped_lot}
+    return {"equity": equity, "metrics": metrics, "trades": trades, "skipped_too_expensive": skipped_lot,
+            "orders": orders, "first_cancelled": first_cancelled}
 
 
 def study(days):
@@ -219,6 +250,8 @@ def study(days):
         "checkpoint_holdout": ("Возврат · позднее окно", late, reversal),
         "checkpoint_retest": ("Ретест · весь архив", days, retest),
         "checkpoint_retest_holdout": ("Ретест · позднее окно", late, retest),
+        "checkpoint_limit": ("Лимитный ретест · весь архив", days, limit_retest),
+        "checkpoint_limit_holdout": ("Лимитный ретест · позднее окно", late, limit_retest),
     }
     results = {}
     for key, (label, subset, entry) in periods.items():
@@ -238,3 +271,26 @@ def study(days):
         }
         results[key] = result
     return results
+
+
+def walkthroughs(days, result):
+    """Embed the first execution and first cancelled order in chronological order."""
+    examples = []
+    if result["trades"]:
+        trade = result["trades"][0]
+        day = date.fromisoformat(trade["trade_day"])
+        hour = datetime.fromisoformat(trade["entry_at"]).hour
+        examples.append({"day": day, "symbol": trade["symbol"], "hour": hour, "side": 1 if trade["side"] == "LONG" else -1,
+                         "limit": trade["limit"], "stop": trade["stop"], "target": trade["target"], "trade": trade})
+    if result["first_cancelled"]:
+        examples.append({**result["first_cancelled"], "trade": None})
+    for sample in examples:
+        last = sample["trade"]["exit_hour_msk"] if sample["trade"] else sample["hour"]
+        history = days[sample["day"]][sample["symbol"]]
+        sample["candles"] = [{"hour": hour, **asdict(history[hour])} for hour in range(10, last + 1)]
+        if sample["trade"] and sample["trade"]["exit_at"]:
+            # At a known opening fill, only the opening print is visible in the replay.
+            opening = history[last].open
+            sample["candles"][-1] = {"hour": last, "open": opening, "high": opening,
+                                     "low": opening, "close": opening}
+    return examples

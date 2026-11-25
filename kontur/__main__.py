@@ -238,11 +238,11 @@ def run_backtest(args):
 
 
 def checkpoint(args):
-    from .intraday import FLAT_AT, LAST_ENTRY, LOTS, PINNED, sessions, study
+    from .intraday import FLAT_AT, LAST_ENTRY, LOTS, PINNED, sessions, study, walkthroughs
 
     days, excluded = sessions(args.bars_dir, args.download)
     results = study(days)
-    selected = "checkpoint_retest"
+    selected = "checkpoint_limit" if args.jury else "checkpoint_retest"
     output = args.output
     report = {
         "schema_version": 1,
@@ -255,10 +255,12 @@ def checkpoint(args):
                        "last_entry_msk": LAST_ENTRY, "source_sha256": PINNED, "lots": LOTS},
         "strategies": results,
     }
+    if args.jury:
+        report["checkpoint"].update(presentation=True, examples=walkthroughs(days, results[selected]))
     target = output / "report.json"
     write_json(target, report)
     fields = ("strategy", "symbol", "side", "trade_day", "entry_at", "exit_at", "exit_hour_msk", "reason",
-              "quantity", "entry_price", "exit_price", "stop", "target", "gross_pnl", "commission",
+              "quantity", "entry_price", "exit_price", "entry_window", "limit", "stop", "target", "gross_pnl", "commission",
               "slippage", "net_pnl", "planned_risk", "notional_multiple")
     with (output / "simulated-trades.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
@@ -266,7 +268,7 @@ def checkpoint(args):
         writer.writerows({**trade, "strategy": key}
                          for key, result in results.items() for trade in result["trades"])
     if WEB_BUNDLE.is_file():
-        standalone_dashboard(output / "dashboard.html", target)
+        standalone_dashboard(output / ("pitch.html" if args.jury else "dashboard.html"), target)
     else:
         print(BUILD_FRONTEND)
     for result in results.values():
@@ -456,6 +458,7 @@ def parser():
     check = commands.add_parser("checkpoint", help="Проверить внутридневную стратегию на закреплённых часовых свечах")
     check.add_argument("--bars-dir", type=Path, default=Path("data/checkpoint/hourly"))
     check.add_argument("--download", action="store_true", help="Скачать отсутствующие архивы и сверить SHA-256")
+    check.add_argument("--jury", action="store_true", help="Собрать автономную презентацию версии 2.0")
     check.add_argument("--output", type=Path, default=Path("results/checkpoint"))
     check.set_defaults(action=checkpoint)
     research = commands.add_parser("research", help="Подготовить сводку и запустить двух рецензентов по запросу")
