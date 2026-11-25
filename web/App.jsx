@@ -7,7 +7,7 @@ import { auditOverlay, date, dates, download, exportTrades, factor, finite, list
   pct, rub, sources, tone, validate, workbench } from "./report.js";
 
 const tabs = [["overview", "Обзор"], ["market", "Рынок"], ["account", "Счёт"], ["analysis", "Ассистент"]];
-const exits = { stop: "Стоп", take_profit: "Цель", close: "Закрытие", gap: "Гэп", rotation: "Ротация" };
+const exits = { stop: "Стоп", take_profit: "Цель", target: "Цель", cutoff: "Выход в 18:00", close: "Закрытие", gap: "Гэп", rotation: "Ротация" };
 const signals = [ ["equity", "Капитал"], ["drawdown", "Просадка"], ["outcomes", "По сделкам"] ];
 const topics = ["Сравни стратегии", "Что с риском?", "Откуда данные?"];
 const tradeDay = (t) => t.trade_day || t.exit_day || t.entry_at?.slice(0, 10);
@@ -74,7 +74,7 @@ function Trades({ trades, day, clear, strategy }) {
     {!matching.length ? <p className="muted">{day ? "В этот день сделки не закрывались." : "На этом отрезке сделок не было."}</p> :
       <table className="report-table"><thead><tr><th>Бумага</th><th>Закрытие</th><th>Результат</th></tr></thead>
         <tbody>{shown.map((t, i) => <tr key={i}>
-          <th scope="row">{t.symbol || t.ticker}<small>{exits[t.reason] || "Выход"}</small></th>
+          <th scope="row">{t.symbol || t.ticker}<small>{t.side && (t.side === "SHORT" ? "Шорт · " : "Лонг · ")}{exits[t.reason] || "Выход"}</small></th>
           <td>{date(tradeDay(t), true)}</td><td className={tone(pnl(t))}>{rub(pnl(t), true)}</td>
         </tr>)}</tbody></table>}
     {matching.length > 6 && <button className="secondary more" onClick={() => setExpanded(!expanded)}>{expanded ? "Свернуть" : "Все сделки"}</button>}
@@ -128,7 +128,7 @@ function Overview({ report, profiles, strategy, period, setStrategy, setPeriod }
   const periodStart = inputs.sample_end || period.end;
   const riskPart = [
     ["Profit Factor", factor(period)],
-    ["При двойных издержках", pct(period.stress_pct, true), tone(period.stress_pct)],
+    ["При двойных издержках", period.stress_trades === 0 ? "Нет сделок" : pct(period.stress_pct, true), tone(period.stress_pct)],
     ["Доля лучшей сделки", pct(period.concentration_pct)],
     ["Годовой темп", pct(period.cagr_pct, true)],
     ["При равном бюджете риска", pct(period.matched_risk_pct, true)],
@@ -137,7 +137,11 @@ function Overview({ report, profiles, strategy, period, setStrategy, setPeriod }
       ? [["Баллы за просадку", num(period.drawdown_points ?? period.score_components.drawdown) + " / 25"]] : []),
     ...(finite(period.pf_points ?? period.score_components?.profit_factor)
       ? [["Баллы за Profit Factor", num(period.pf_points ?? period.score_components.profit_factor) + " / 15"]] : []),
-    ["Остановка входов", period.halt || period.risk_halt_date ? date(period.halt || period.risk_halt_date) : "Лимит не достигнут"],
+    ...(report.checkpoint ? [
+      ["Последний вход · МСК", report.checkpoint.last_entry_msk + ":00"],
+      ["Вне позиции · МСК", report.checkpoint.flat_at_msk + ":00"],
+    ] : [["Остановка входов", period.halt || period.risk_halt_date
+      ? date(period.halt || period.risk_halt_date) : "Лимит не достигнут"]]),
   ];
   const chooseDay = (session) => {
     if (!Array.isArray(period.trades)) return;
@@ -151,7 +155,7 @@ function Overview({ report, profiles, strategy, period, setStrategy, setPeriod }
       <OrbScene />
       <div className="hero-text">
         <span className="source"><i aria-hidden="true" />{sources[inputs.dataset] || "Исторические данные"}</span>
-        <h1 id="hero-title">Торговые<br />стратегии</h1>
+        <h1 id="hero-title">{report.checkpoint ? <>Циклон<br />Интрадей</> : <>Торговые<br />стратегии</>}</h1>
         <p>Данные по {date(periodStart)}</p>
       </div>
     </section>
@@ -188,6 +192,14 @@ function Overview({ report, profiles, strategy, period, setStrategy, setPeriod }
       <Detail title="Риск и издержки">
         <Metrics values={riskPart.filter(([, value]) => value !== "—")} />
       </Detail>
+      {report.checkpoint && <Detail title="Правила чекпоинта">
+        <p>10:00–11:00 МСК — диапазон первого часа. {strategy.key.startsWith("checkpoint_retest")
+          ? "Свеча ретеста закрывается за пробитой границей. Вход на следующем открытии, стоп за ретестом, цель 2R."
+          : "Свеча выноса закрывается обратно внутри диапазона. Вход на следующем открытии, цель до 2R внутри диапазона."}</p>
+        <p>Одна позиция в день, риск по стопу до 0,30% капитала. В 18:00 МСК позиция закрывается. Часовые свечи, лоты и издержки заданы для симуляции.</p>
+        {period.by_side && <Metrics values={Object.entries(period.by_side).map(([side, row]) =>
+          [(side === "LONG" ? "Лонг" : "Шорт") + " · " + num(row.count), rub(row.net, true), tone(row.net)])} />}
+      </Detail>}
       {period.attribution && <Attribution report={period.attribution} />}
       {strategy.targets && <GoalHistory goals={strategy.targets} />}
       {strategy.annual?.length > 0 && <Detail title="Результаты по годам" hint={strategy.annualSummary?.profitable + " / " + strategy.annualSummary?.count + " в плюсе"}>

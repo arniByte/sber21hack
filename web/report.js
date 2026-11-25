@@ -24,6 +24,10 @@ const studyColors = {
   rotation: ["Недельная ротация", "#4a63ba"], pullback: ["Покупка отката", "#956344"],
 };
 const intradayColors = {
+  checkpoint_retest: ["Ретест · весь архив", "#405cb3"],
+  checkpoint_retest_holdout: ["Ретест · июль — сентябрь", "#248477"],
+  checkpoint: ["Возврат · весь архив", "#956344"],
+  checkpoint_holdout: ["Возврат · июль — сентябрь", "#b76172"],
   hybrid: ["События + рынок", "#784cbd"], market: ["Только рынок", "#3b8375"], momentum: ["Импульс цены", "#956344"],
 };
 
@@ -54,7 +58,8 @@ export function workbench(report) {
       drawdown: w.metrics.max_drawdown_pct, equity: list(w.equity).map(([date, equity]) => ({ date, equity })),
     })) : [];
     windows.unshift({
-      id: "base", label: periodLabels.base, ...profile.metrics, start: report.meta.oos_start, end: report.meta.oos_end,
+      id: "base", label: periodLabels.base, ...profile.metrics, start: profile.start || report.meta.oos_start, end: profile.end || report.meta.oos_end,
+      stress_pct: profile.stress_pct, stress_trades: profile.stress_trades, attribution: profile.attribution, by_side: profile.by_side,
       drawdown: profile.metrics.max_drawdown_pct, equity: list(profile.equity), trades: profile.trades,
     });
     return [{ key, label, color, windows, group: "Внутридневные" }];
@@ -95,13 +100,13 @@ export function download(name, content, type) {
 }
 
 export function exportTrades(items, key) {
-  const columns = ["symbol", "entry", "exit", "gross_pnl", "commission", "slippage", "net_pnl", "reason"];
+  const columns = ["symbol", "side", "entry", "exit", "gross_pnl", "commission", "slippage", "net_pnl", "reason"];
   const cell = (value) => {
     let text = String(value ?? "");
     if (typeof value === "string" && /^[\s]*[=+@-]/.test(text)) text = "'" + text;
     return '"' + text.replaceAll('"', '""') + '"';
   };
-  const values = items.map((t) => [t.symbol || t.ticker, t.entry_day || t.entry_at,
+  const values = items.map((t) => [t.symbol || t.ticker, t.side, t.entry_day || t.entry_at,
     t.exit_day || t.exit_at, t.gross_pnl, t.commission, t.slippage, t.net_pnl ?? t.pnl, t.reason]);
   download("cyclone-" + key + "-trades.csv", "\ufeff" + [columns.join(","), ...values.map((row) => row.map(cell).join(","))].join("\r\n"), "text/csv;charset=utf-8");
 }

@@ -52,7 +52,9 @@ def report_context(report, agent, period):
         if daily:
             meta = report["meta"]
             if period in (None, "base"):
-                start, end, stats = meta["oos_start"], meta["oos_end"], daily["metrics"]
+                start = daily.get("start", meta["oos_start"])
+                end = daily.get("end", meta["oos_end"])
+                stats = daily["metrics"]
             else:
                 window = next((w for w in report.get("horizons", [])
                                if w["available"] and str(w["months"]) == period), None)

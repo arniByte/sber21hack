@@ -237,6 +237,44 @@ def run_backtest(args):
     print(f"Отчёт: {report_path}")
 
 
+def checkpoint(args):
+    from .intraday import FLAT_AT, LAST_ENTRY, LOTS, PINNED, sessions, study
+
+    days, excluded = sessions(args.bars_dir, args.download)
+    results = study(days)
+    selected = "checkpoint_retest"
+    output = args.output
+    report = {
+        "schema_version": 1,
+        "meta": {"dataset": "archive", "oos_start": min(days), "oos_end": max(days),
+                 "sample_start": min(days), "sample_end": max(days),
+                 "start_capital": results[selected]["metrics"]["initial_capital"],
+                 "symbols": list(PINNED), "bars": len(days) * len(PINNED) * (FLAT_AT - 9), "events": 0},
+        "preset": {"agent": selected},
+        "checkpoint": {"sessions": len(days), "excluded_sessions": excluded, "flat_at_msk": FLAT_AT,
+                       "last_entry_msk": LAST_ENTRY, "source_sha256": PINNED, "lots": LOTS},
+        "strategies": results,
+    }
+    target = output / "report.json"
+    write_json(target, report)
+    fields = ("strategy", "symbol", "side", "trade_day", "entry_at", "exit_at", "exit_hour_msk", "reason",
+              "quantity", "entry_price", "exit_price", "stop", "target", "gross_pnl", "commission",
+              "slippage", "net_pnl", "planned_risk", "notional_multiple")
+    with (output / "simulated-trades.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows({**trade, "strategy": key}
+                         for key, result in results.items() for trade in result["trades"])
+    if WEB_BUNDLE.is_file():
+        standalone_dashboard(output / "dashboard.html", target)
+    else:
+        print(BUILD_FRONTEND)
+    for result in results.values():
+        m = result["metrics"]
+        print(f"{result['label']}: {m['return_pct']:+.2f}%, просадка {m['max_drawdown_pct']:.2f}%, сделок {m['trade_count']}")
+    print(f"Отчёт чекпоинта: {target}")
+
+
 def research_report(args):
     from .mishka import enabled
     from .research import ROLES, dossier, messages, review
@@ -415,6 +453,11 @@ def parser():
         command.add_argument("--market-snapshot", type=Path, help="Свечи широкого рынка для рейтинга")
         command.add_argument("--lot", action="append", default=[], metavar="ТИКЕР=КОЛИЧЕСТВО")
         command.set_defaults(action=run_backtest)
+    check = commands.add_parser("checkpoint", help="Проверить внутридневную стратегию на закреплённых часовых свечах")
+    check.add_argument("--bars-dir", type=Path, default=Path("data/checkpoint/hourly"))
+    check.add_argument("--download", action="store_true", help="Скачать отсутствующие архивы и сверить SHA-256")
+    check.add_argument("--output", type=Path, default=Path("results/checkpoint"))
+    check.set_defaults(action=checkpoint)
     research = commands.add_parser("research", help="Подготовить сводку и запустить двух рецензентов по запросу")
     research.add_argument("--report", type=Path, required=True, help="Файл decade-study.json")
     research.add_argument("--output", type=Path, default=Path("results/research.json"))
